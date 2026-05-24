@@ -1,8 +1,279 @@
-//
-// Created by Ethan Tran on 5/24/2026.
-//
+#pragma once
 
-#ifndef UNDERTHEGUN_BOARD_ABSTRACTION_HPP
-#define UNDERTHEGUN_BOARD_ABSTRACTION_HPP
+#include "holdem/street.hpp"
 
-#endif //UNDERTHEGUN_BOARD_ABSTRACTION_HPP
+#include "poker/board.hpp"
+#include "poker/card.hpp"
+#include "poker/deck_mask.hpp"
+
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+namespace poker::holdem {
+
+using BoardBucketId = int;
+
+constexpr BoardBucketId kInvalidBoardBucket = -1;
+
+// One possible public-card transition.
+//
+// Exact mode:
+//   board      = exact resulting board
+//   bucket_id  = kInvalidBoardBucket
+//
+// Abstract mode:
+//   board      = representative board or exact sampled board
+//   bucket_id  = abstraction bucket
+//
+// probability must be normalized among all returned outcomes.
+struct BoardTransition {
+    Board board;
+    Street street = Street::River;
+    BoardBucketId bucket_id = kInvalidBoardBucket;
+    float probability = 0.0f;
+};
+
+class BoardAbstraction {
+public:
+    virtual ~BoardAbstraction() = default;
+
+    // Returns possible public-board transitions after a betting round closes.
+    //
+    // Examples:
+    //
+    // Flop state:
+    //   current board has 3 cards
+    //   next street is Turn
+    //   exact mode returns one transition for every legal turn card
+    //
+    // Turn state:
+    //   current board has 4 cards
+    //   next street is River
+    //   exact mode returns one transition for every legal river card
+    //
+    // River state:
+    //   no next public-card transitions
+    virtual std::vector<BoardTransition> next_board_transitions(
+        Street current_street,
+        const Board& current_board,
+        DeckMask dead_cards
+    ) const = 0;
+
+    // Returns a public-board bucket for an already-existing board.
+    //
+    // Exact mode can return kInvalidBoardBucket.
+    // Abstract mode should return a stable bucket id.
+    virtual BoardBucketId bucket_for(
+        Street street,
+        const Board& board
+    ) const = 0;
+
+    virtual bool is_exact() const = 0;
+};
+
+// -----------------------------------------------------------------------------
+// Exact board abstraction
+// -----------------------------------------------------------------------------
+//
+// This is the default implementation. It does not abstract boards.
+// It enumerates every legal public card transition exactly.
+
+class ExactBoardAbstraction final : public BoardAbstraction {
+public:
+    std::vector<BoardTransition> next_board_transitions(
+        Street current_street,
+        const Board& current_board,
+        DeckMask dead_cards
+    ) const override {
+        validate_street(current_street);
+        current_board.validate();
+        validate_deck_mask(dead_cards);
+
+        if (current_street == Street::River) {
+            return {};
+        }
+
+        const Street next = next_street(current_street);
+        const int cards_to_deal = cards_to_deal_on_next_street(current_street);
+
+        // For your postflop subgame builder:
+        //
+        //   Flop -> Turn: deal 1 card
+        //   Turn -> River: deal 1 card
+        //
+        // Preflop -> Flop needs 3-card combinations. I would not implement
+        // preflop here until the rest of the solver is stable.
+        if (cards_to_deal != 1) {
+            throw std::invalid_argument(
+                "ExactBoardAbstraction currently supports only one-card transitions."
+            );
+        }
+
+        if (!board_size_matches_street(current_street, current_board.size())) {
+            throw std::invalid_argument(
+                "Current board size does not match current street."
+            );
+        }
+
+        DeckMask unavailable = dead_cards | board_mask(current_board);
+        validate_deck_mask(unavailable);
+
+        const std::vector<CardId> available_cards =
+            cards_from_mask(remaining_cards(unavailable));
+
+        if (available_cards.empty()) {
+            throw std::invalid_argument(
+                "No legal public cards remain for board transition."
+            );
+        }
+
+        const float probability =
+            1.0f / static_cast<float>(available_cards.size());
+
+        std::vector<BoardTransition> transitions;
+        transitions.reserve(available_cards.size());
+
+        for (CardId card : available_cards) {
+            Board next_board = current_board.with_added_card(card);
+
+            if (!board_size_matches_street(next, next_board.size())) {
+                throw std::logic_error(
+                    "Next board size does not match next street."
+                );
+            }
+
+            transitions.push_back(
+                BoardTransition{
+                    next_board,
+                    next,
+                    kInvalidBoardBucket,
+                    probability
+                }
+            );
+        }
+
+        return transitions;
+    }
+
+    BoardBucketId bucket_for(
+        Street street,
+        const Board& board
+    ) const override {
+        validate_street(street);
+        board.validate();
+
+        if (!board_size_matches_street(street, board.size())) {
+            throw std::invalid_argument(
+                "Board size does not match street."
+            );
+        }
+
+        return kInvalidBoardBucket;
+    }
+
+    bool is_exact() const override {
+        return true;
+    }
+};
+
+// -----------------------------------------------------------------------------
+// Bucketed board abstraction interface
+// -----------------------------------------------------------------------------
+//
+// This is a base class for later abstractions. For example:
+//   - texture buckets
+//   - equity-distribution buckets
+//   - hand-crafted flop classes
+//   - learned buckets
+//
+// You can implement this later without changing HoldemSubgameBuilder.
+
+class BucketedBoardAbstraction : public BoardAbstraction {
+public:
+    bool is_exact() const override {
+        return false;
+    }
+};
+
+// -----------------------------------------------------------------------------
+// Simple representative-bucket abstraction placeholder
+// -----------------------------------------------------------------------------
+//
+// This is intentionally minimal. It is useful for wiring the builder and
+// infoset keys before implementing a real board-clustering system.
+
+class NullBucketedBoardAbstraction final : public BucketedBoardAbstraction {
+public:
+    std::vector<BoardTransition> next_board_transitions(
+        Street current_street,
+        const Board& current_board,
+        DeckMask dead_cards
+    ) const override {
+        // Until real board bucketing exists, fall back to exact transitions.
+        return exact_.next_board_transitions(
+            current_street,
+            current_board,
+            dead_cards
+        );
+    }
+
+    BoardBucketId bucket_for(
+        Street street,
+        const Board& board
+    ) const override {
+        validate_street(street);
+        board.validate();
+
+        if (!board_size_matches_street(street, board.size())) {
+            throw std::invalid_argument(
+                "Board size does not match street."
+            );
+        }
+
+        // One bucket per street as a placeholder.
+        //
+        // This is not strategically meaningful. It only lets the rest of the
+        // abstraction plumbing compile.
+        switch (street) {
+            case Street::Preflop:
+                return 0;
+
+            case Street::Flop:
+                return 1;
+
+            case Street::Turn:
+                return 2;
+
+            case Street::River:
+                return 3;
+        }
+
+        return kInvalidBoardBucket;
+    }
+
+private:
+    ExactBoardAbstraction exact_;
+};
+
+// -----------------------------------------------------------------------------
+// Factory helpers
+// -----------------------------------------------------------------------------
+
+inline std::shared_ptr<const BoardAbstraction> make_exact_board_abstraction() {
+    return std::make_shared<ExactBoardAbstraction>();
+}
+
+inline std::shared_ptr<const BoardAbstraction> make_null_bucketed_board_abstraction() {
+    return std::make_shared<NullBucketedBoardAbstraction>();
+}
+
+inline std::string to_string(const BoardTransition& transition) {
+    return "street=" + to_string(transition.street) +
+           "|board=" + poker::to_string(transition.board) +
+           "|bucket=" + std::to_string(transition.bucket_id) +
+           "|prob=" + std::to_string(transition.probability);
+}
+
+} // namespace poker::holdem
