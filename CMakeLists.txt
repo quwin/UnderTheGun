@@ -27,10 +27,41 @@ add_library(kuhn_gpu_cfr_lib
         include/gpu_state.hpp
         include/cfr_gpu.hpp
 
+        include/poker/card.hpp
+        include/poker/deck_mask.hpp
+        include/poker/hand.hpp
+        include/poker/board.hpp
+        include/poker/range.hpp
+        include/poker/hand_evaluator.hpp
+
+        include/holdem/street.hpp
+        include/holdem/action.hpp
+        include/holdem/betting_state.hpp
+        include/holdem/betting_abstraction.hpp
+        include/holdem/betting_engine.hpp
+        include/holdem/public_state.hpp
+        include/holdem/private_state.hpp
+        include/holdem/chance_model.hpp
+        include/holdem/terminal_utility.hpp
+        include/holdem/infoset_key.hpp
+        include/holdem/hand_abstraction.hpp
+        include/holdem/board_abstraction.hpp
+        include/holdem/subgame_config.hpp
+        include/holdem/subgame_builder.hpp
+
         src/kuhn_builder.cpp
         src/cfr_cpu.cpp
         src/exploitability.cpp
         src/cfr_gpu.cpp
+
+        src/poker/card.cpp
+        src/poker/range.cpp
+        src/poker/hand_evaluator.cpp
+        src/holdem/betting_engine.cpp
+        src/holdem/chance_model.cpp
+        src/holdem/terminal_utility.cpp
+        src/holdem/infoset_key.cpp
+        src/holdem/subgame_builder.cpp
 
         cuda/kernels.cu
         cuda/kernels.hpp
@@ -89,51 +120,109 @@ set_target_properties(UnderTheGun
 
 enable_testing()
 
-add_executable(test_kuhn_tree
-        tests/test_kuhn_tree.cpp
+add_executable(test_betting_engine
+        tests/test_betting_engine.cpp
 )
-
-target_link_libraries(test_kuhn_tree
+target_link_libraries(test_betting_engine
         PRIVATE
         kuhn_gpu_cfr_lib
 )
-
 add_test(
-        NAME test_kuhn_tree
-        COMMAND test_kuhn_tree
+        NAME test_betting_engine
+        COMMAND test_betting_engine
 )
 
-add_executable(test_cfr_cpu
-        tests/test_cfr_cpu.cpp
+add_executable(test_deck_mask
+        tests/test_deck_mask.cpp
 )
-
-target_link_libraries(test_cfr_cpu
+target_link_libraries(test_deck_mask
         PRIVATE
         kuhn_gpu_cfr_lib
 )
-
 add_test(
-        NAME test_cfr_cpu
-        COMMAND test_cfr_cpu
+        NAME test_deck_mask
+        COMMAND test_deck_mask
 )
 
-add_executable(test_gpu_vs_cpu
-        tests/test_gpu_vs_cpu.cpp
+add_executable(test_flop_subgame_tree
+        tests/test_flop_subgame_tree.cpp
 )
-
-target_link_libraries(test_gpu_vs_cpu
+target_link_libraries(test_flop_subgame_tree
         PRIVATE
         kuhn_gpu_cfr_lib
 )
-
-set_target_properties(test_gpu_vs_cpu
-        PROPERTIES
-        LINKER_LANGUAGE CUDA
-        CUDA_SEPARABLE_COMPILATION ON
-        CUDA_RESOLVE_DEVICE_SYMBOLS ON
+add_test(
+        NAME test_flop_subgame_tree
+        COMMAND test_flop_subgame_tree
 )
 
+add_executable(test_hand_evaluator
+        tests/test_hand_evaluator.cpp
+)
+target_link_libraries(test_hand_evaluator
+        PRIVATE
+        kuhn_gpu_cfr_lib
+)
 add_test(
-        NAME test_gpu_vs_cpu
-        COMMAND test_gpu_vs_cpu
+        NAME test_hand_evaluator
+        COMMAND test_hand_evaluator
+)
+
+add_executable(test_infoset_key_privacy
+        tests/test_infoset_key_privacy.cpp
+)
+target_link_libraries(test_infoset_key_privacy
+        PRIVATE
+        kuhn_gpu_cfr_lib
+)
+add_test(
+        NAME test_infoset_key_privacy
+        COMMAND test_infoset_key_privacy
+)
+
+add_executable(test_range_card_removal
+        tests/test_range_card_removal.cpp
+)
+target_link_libraries(test_range_card_removal
+        PRIVATE
+        kuhn_gpu_cfr_lib
+)
+add_test(
+        NAME test_range_card_removal
+        COMMAND test_range_card_removal
+)
+add_executable(test_river_subgame_tree
+        tests/test_river_subgame_tree.cpp
+)
+target_link_libraries(test_river_subgame_tree
+        PRIVATE
+        kuhn_gpu_cfr_lib
+)
+add_test(
+        NAME test_river_subgame_tree
+        COMMAND test_river_subgame_tree
+)
+
+add_executable(test_turn_subgame_tree
+        tests/test_turn_subgame_tree.cpp
+)
+target_link_libraries(test_turn_subgame_tree
+        PRIVATE
+        kuhn_gpu_cfr_lib
+)
+add_test(
+        NAME test_turn_subgame_tree
+        COMMAND test_turn_subgame_tree
+)
+
+add_executable(test_terminal_utility
+        tests/test_terminal_utility.cpp
+)
+target_link_libraries(test_terminal_utility
+        PRIVATE
+        kuhn_gpu_cfr_lib
+)
+add_test(
+        NAME test_terminal_utility
+        COMMAND test_terminal_utility
 )

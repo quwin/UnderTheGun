@@ -1,0 +1,8 @@
+//
+// Created by Ethan Tran on 5/24/2026.
+//
+
+#ifndef UNDERTHEGUN_DECK_MASK_HPP
+#define UNDERTHEGUN_DECK_MASK_HPP
+
+#endif //UNDERTHEGUN_DECK_MASK_HPP

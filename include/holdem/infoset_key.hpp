@@ -1,0 +1,8 @@
+//
+// Created by Ethan Tran on 5/24/2026.
+//
+
+#ifndef UNDERTHEGUN_INFOSET_KEY_HPP
+#define UNDERTHEGUN_INFOSET_KEY_HPP
+
+#endif //UNDERTHEGUN_INFOSET_KEY_HPP

@@ -1,0 +1,8 @@
+//
+// Created by Ethan Tran on 5/24/2026.
+//
+
+#ifndef UNDERTHEGUN_BETTING_STATE_HPP
+#define UNDERTHEGUN_BETTING_STATE_HPP
+
+#endif //UNDERTHEGUN_BETTING_STATE_HPP

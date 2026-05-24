@@ -1,0 +1,8 @@
+//
+// Created by Ethan Tran on 5/24/2026.
+//
+
+#ifndef UNDERTHEGUN_CHANCE_MODEL_HPP
+#define UNDERTHEGUN_CHANCE_MODEL_HPP
+
+#endif //UNDERTHEGUN_CHANCE_MODEL_HPP

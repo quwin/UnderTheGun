@@ -28,12 +28,45 @@ enum class Action : int {
     Fold  = 4
 };
 
-enum class Card : int {
-    Jack  = 0,
-    Queen = 1,
-    King  = 2,
-    None  = -1
+enum class Street {
+    PreFlop,
+    Flop,
+    Turn,
+    River
 };
+
+enum class Suit : int {
+    Club = 1,
+    Diamond = 2,
+    Heart   = 3,
+    Spade  = 4,
+};
+
+struct Card {
+    uint8_t rank; // 2..14
+    Suit suit;
+};
+
+struct HoldemSubgameConfig {
+    Street start_street;
+
+    std::vector<Card> board;
+    int pot_size;
+    int effective_stack;
+    Player player_to_act;
+
+    Range p0_range;
+    Range p1_range;
+
+    BettingAbstraction betting_abstraction;
+
+    bool use_card_abstraction = false;
+    bool use_action_abstraction = true;
+};
+
+inline uint8_t to_card_id(Card c) {
+    return c.rank * static_cast<uint16_t>(c.suit);
+}
 
 inline int to_index(Player p) {
     assert(p == Player::P0 || p == Player::P1);
@@ -54,6 +87,16 @@ inline std::string to_string(Player p) {
     return "Unknown";
 }
 
+inline std::string to_string(Suit s) {
+    switch (s) {
+        case Suit::Club:   return "Club";
+        case Suit::Diamond:       return "Diamond";
+        case Suit::Heart:       return "Heart";
+        case Suit::Spade: return "Spade";
+    }
+    return "Unknown";
+}
+
 inline std::string to_string(Action a) {
     switch (a) {
         case Action::Deal:  return "Deal";
@@ -66,11 +109,12 @@ inline std::string to_string(Action a) {
 }
 
 inline std::string to_string(Card c) {
-    switch (c) {
-        case Card::Jack:  return "J";
-        case Card::Queen: return "Q";
-        case Card::King:  return "K";
-        case Card::None:  return "-";
+    switch (c.rank) {
+        case 11:  return "J";
+        case 12:  return "Q";
+        case 13:  return "K";
+        case 14:  return "A";
+        default: return std::to_string(c.rank);
     }
     return "?";
 }
