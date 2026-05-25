@@ -95,15 +95,15 @@ poker::holdem::PublicState make_initial_river_state() {
     state.pot = kStartingPot;
     state.p0_stack = kStartingStack;
     state.p1_stack = kStartingStack;
-    state.p0_committed_this_round = 0;
-    state.p1_committed_this_round = 0;
-    state.current_bet_to_call = 0;
-    state.last_raise_size = 0;
-    state.num_raises_this_street = 0;
+    state.betting.p0_committed_this_round = 0;
+    state.betting.p1_committed_this_round = 0;
+    state.betting.current_bet_to_call = 0;
+    state.betting.last_raise_size = 0;
+    state.betting.num_raises_this_street = 0;
     state.player_to_act = poker::Player::P0;
-    state.last_aggressor = poker::Player::Chance;
-    state.round_has_bet = false;
-    state.last_action_was_check = false;
+    state.betting.last_aggressor = poker::Player::Chance;
+    state.betting.round_has_bet = false;
+    state.betting.last_action_was_check = false;
     state.terminal = false;
     state.terminal_reason = poker::holdem::TerminalReason::None;
     state.action_history.clear();
@@ -202,7 +202,7 @@ void test_check_switches_player_to_act() {
     check_eq(next.pot, kStartingPot, "Check should not change pot.");
     check_eq(next.p0_stack, kStartingStack, "Check should not change P0 stack.");
     check_eq(next.p1_stack, kStartingStack, "Check should not change P1 stack.");
-    check_eq(next.current_bet_to_call, 0, "Check should not create a bet to call.");
+    check_eq(next.betting.current_bet_to_call, 0, "Check should not create a bet to call.");
 
     check(
         !engine.betting_round_closed(next),
@@ -233,7 +233,7 @@ void test_check_check_closes_round() {
     );
 
     check_eq(state.pot, kStartingPot, "Check-check should not change pot.");
-    check_eq(state.current_bet_to_call, 0, "Check-check should leave call amount at zero.");
+    check_eq(state.betting.current_bet_to_call, 0, "Check-check should leave call amount at zero.");
 
     std::cout << "[pass] test_check_check_closes_round\n";
 }
@@ -254,19 +254,19 @@ void test_bet_updates_pot_stack_and_player_to_act() {
     check_eq(next.p1_stack, 2000, "Bet should not affect opponent stack yet.");
 
     check_eq(
-        next.p0_committed_this_round,
+        next.betting.p0_committed_this_round,
         500,
         "Bet should update bettor committed amount."
     );
 
     check_eq(
-        next.p1_committed_this_round,
+        next.betting.p1_committed_this_round,
         0,
         "Bet should not update opponent committed amount."
     );
 
     check_eq(
-        next.current_bet_to_call,
+        next.betting.current_bet_to_call,
         500,
         "Bet should create a call amount."
     );
@@ -277,7 +277,7 @@ void test_bet_updates_pot_stack_and_player_to_act() {
     );
 
     check(
-        next.last_aggressor == poker::Player::P0,
+        next.betting.last_aggressor == poker::Player::P0,
         "P0 should be recorded as last aggressor."
     );
 
@@ -357,13 +357,13 @@ void test_call_closes_round_and_equalizes_commitments() {
     check_eq(state.p1_stack, 1500, "P1 stack after call mismatch.");
 
     check_eq(
-        state.p0_committed_this_round,
+        state.betting.p0_committed_this_round,
         500,
         "P0 committed amount should remain 500."
     );
 
     check_eq(
-        state.p1_committed_this_round,
+        state.betting.p1_committed_this_round,
         500,
         "P1 committed amount should become 500 after call."
     );
@@ -439,25 +439,25 @@ void test_raise_updates_call_amount_and_raise_count() {
     check_eq(state.p1_stack, 750, "P1 stack should subtract raise-to amount.");
 
     check_eq(
-        state.p1_committed_this_round,
+        state.betting.p1_committed_this_round,
         1250,
         "P1 committed amount should equal raise-to amount."
     );
 
     check_eq(
-        state.current_bet_to_call,
+        state.betting.current_bet_to_call,
         1250,
         "Current bet to call should be the raised-to amount."
     );
 
     check_eq(
-        state.last_raise_size,
+        state.betting.last_raise_size,
         750,
         "Last raise size should be raise-to amount minus previous bet."
     );
 
     check_eq(
-        state.num_raises_this_street,
+        state.betting.num_raises_this_street,
         1,
         "Raise count should increment."
     );
@@ -468,7 +468,7 @@ void test_raise_updates_call_amount_and_raise_count() {
     );
 
     check(
-        state.last_aggressor == poker::Player::P1,
+        state.betting.last_aggressor == poker::Player::P1,
         "P1 should be the last aggressor after raising."
     );
 
@@ -527,8 +527,8 @@ void test_all_in_clamps_to_stack() {
 
     check_eq(state.pot, 3000, "All-in should add full stack to pot.");
     check_eq(state.p0_stack, 0, "All-in bettor stack should become zero.");
-    check_eq(state.p0_committed_this_round, 2000, "All-in committed mismatch.");
-    check_eq(state.current_bet_to_call, 2000, "All-in should set call amount.");
+    check_eq(state.betting.p0_committed_this_round, 2000, "All-in committed mismatch.");
+    check_eq(state.betting.current_bet_to_call, 2000, "All-in should set call amount.");
 
     check(
         state.player_to_act == poker::Player::P1,

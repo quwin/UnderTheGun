@@ -93,18 +93,18 @@ poker::holdem::PublicState make_base_river_state() {
     state.p0_stack = 2000;
     state.p1_stack = 2000;
 
-    state.p0_committed_this_round = 0;
-    state.p1_committed_this_round = 0;
+    state.betting.p0_committed_this_round = 0;
+    state.betting.p1_committed_this_round = 0;
 
-    state.current_bet_to_call = 0;
-    state.last_raise_size = 0;
-    state.num_raises_this_street = 0;
+    state.betting.current_bet_to_call = 0;
+    state.betting.last_raise_size = 0;
+    state.betting.num_raises_this_street = 0;
 
     state.player_to_act = poker::Player::P0;
-    state.last_aggressor = poker::Player::Chance;
+    state.betting.last_aggressor = poker::Player::Chance;
 
-    state.round_has_bet = false;
-    state.last_action_was_check = false;
+    state.betting.round_has_bet = false;
+    state.betting.last_action_was_check = false;
 
     state.terminal = false;
     state.terminal_reason = poker::holdem::TerminalReason::None;
@@ -141,8 +141,8 @@ void test_p1_folds_to_p0_bet_p0_wins_current_pot_minus_own_commitment() {
     //   P0 wins pot but already contributed 500 on this street.
     //   net = 1500 - 500 = +1000.
     state.pot = 1500;
-    state.p0_committed_this_round = 500;
-    state.p1_committed_this_round = 0;
+    state.betting.p0_committed_this_round = 500;
+    state.betting.p1_committed_this_round = 0;
     state.p0_stack = 1500;
     state.p1_stack = 2000;
 
@@ -186,8 +186,8 @@ void test_p0_folds_to_p1_bet_p0_loses_own_commitment() {
     // If your convention treats the starting pot as contestable equity, folding
     // after committing zero returns 0 for P0, not -1000.
     state.pot = 1500;
-    state.p0_committed_this_round = 0;
-    state.p1_committed_this_round = 500;
+    state.betting.p0_committed_this_round = 0;
+    state.betting.p1_committed_this_round = 500;
     state.p0_stack = 2000;
     state.p1_stack = 1500;
 
@@ -229,8 +229,8 @@ void test_p0_folds_after_calling_or_raising_loses_own_commitment() {
     // Terminal pot = 3000.
     // P0's net utility by street-net convention = -800.
     state.pot = 3000;
-    state.p0_committed_this_round = 800;
-    state.p1_committed_this_round = 1200;
+    state.betting.p0_committed_this_round = 800;
+    state.betting.p1_committed_this_round = 1200;
     state.p0_stack = 1200;
     state.p1_stack = 800;
 
@@ -271,8 +271,8 @@ void test_p0_wins_showdown_gets_pot_minus_own_commitment() {
     // P0 committed 500 on this street.
     // net = 2000 - 500 = +1500.
     state.pot = 2000;
-    state.p0_committed_this_round = 500;
-    state.p1_committed_this_round = 500;
+    state.betting.p0_committed_this_round = 500;
+    state.betting.p1_committed_this_round = 500;
     state.p0_stack = 1500;
     state.p1_stack = 1500;
 
@@ -312,8 +312,8 @@ void test_p0_loses_showdown_loses_own_commitment() {
     // Terminal pot 2000, P0 committed 500.
     // net = -500.
     state.pot = 2000;
-    state.p0_committed_this_round = 500;
-    state.p1_committed_this_round = 500;
+    state.betting.p0_committed_this_round = 500;
+    state.betting.p1_committed_this_round = 500;
     state.p0_stack = 1500;
     state.p1_stack = 1500;
 
@@ -363,8 +363,8 @@ void test_showdown_tie_splits_pot() {
     // This includes P0's half of the starting pot. With a street-net
     // convention, ties can be positive if there was already a pot to split.
     state.pot = 2000;
-    state.p0_committed_this_round = 500;
-    state.p1_committed_this_round = 500;
+    state.betting.p0_committed_this_round = 500;
+    state.betting.p1_committed_this_round = 500;
 
     state.terminal = true;
     state.terminal_reason = poker::holdem::TerminalReason::Showdown;
@@ -400,8 +400,8 @@ void test_all_in_showdown_win_uses_full_terminal_pot() {
     // P0 committed = 2000.
     // P0 wins net = 5000 - 2000 = +3000.
     state.pot = 5000;
-    state.p0_committed_this_round = 2000;
-    state.p1_committed_this_round = 2000;
+    state.betting.p0_committed_this_round = 2000;
+    state.betting.p1_committed_this_round = 2000;
     state.p0_stack = 0;
     state.p1_stack = 0;
 

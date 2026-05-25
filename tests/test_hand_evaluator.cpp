@@ -457,12 +457,12 @@ void test_category_ordering() {
     );
 
     check_compare_positive(
-        evaluator.compare(pair_aces, high_card, common_board),
+        evaluator.compare_7(pair_aces, high_card, common_board),
         "One pair should beat high card."
     );
 
     check_compare_negative(
-        evaluator.compare(high_card, pair_aces, common_board),
+        evaluator.compare_7(high_card, pair_aces, common_board),
         "High card should lose to one pair."
     );
 
@@ -491,7 +491,7 @@ void test_pair_kicker_breaks_tie() {
     );
 
     check_compare_positive(
-        evaluator.compare(better, worse, b),
+        evaluator.compare_7(better, worse, b),
         "Same pair should be decided by kicker."
     );
 
@@ -520,7 +520,7 @@ void test_two_pair_kicker_breaks_tie() {
     );
 
     check_compare_positive(
-        evaluator.compare(better, worse, b),
+        evaluator.compare_7(better, worse, b),
         "Same two pair should be decided by kicker."
     );
 
@@ -549,7 +549,7 @@ void test_board_only_tie() {
     );
 
     check_compare_zero(
-        evaluator.compare(p0, p1, royal_board),
+        evaluator.compare_7(p0, p1, royal_board),
         "Both players should tie when board makes royal flush."
     );
 

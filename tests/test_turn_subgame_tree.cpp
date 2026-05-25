@@ -160,8 +160,8 @@ poker::holdem::HoldemSubgameConfig make_test_config() {
 
     config.betting_abstraction = make_tiny_betting_abstraction();
 
-    config.use_card_abstraction = false;
-    config.use_action_abstraction = true;
+    //config.hand_abstraction = ;
+    //config.board_abstraction = ;
 
     return config;
 }
@@ -200,12 +200,12 @@ int count_nodes_with_player(
 
 bool has_action_type(
     const poker::InfoSet& infoset,
-    poker::Action action
+    poker::holdem::ActionType action_type
 ) {
     return std::find(
         infoset.actions.begin(),
         infoset.actions.end(),
-        action
+        action_type
     ) != infoset.actions.end();
 }
 
@@ -519,16 +519,16 @@ void test_infoset_action_sets_are_reasonable() {
 
     for (const poker::InfoSet& infoset : game.infosets) {
         const bool has_check =
-            has_action_type(infoset, poker::Action::Check);
+            has_action_type(infoset, poker::holdem::ActionType::Check);
 
         const bool has_bet =
-            has_action_type(infoset, poker::Action::Bet);
+            has_action_type(infoset, poker::holdem::ActionType::Bet);
 
         const bool has_call =
-            has_action_type(infoset, poker::Action::Call);
+            has_action_type(infoset, poker::holdem::ActionType::Call);
 
         const bool has_fold =
-            has_action_type(infoset, poker::Action::Fold);
+            has_action_type(infoset, poker::holdem::ActionType::Fold);
 
         if (has_check || has_bet) {
             check(

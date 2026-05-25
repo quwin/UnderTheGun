@@ -338,8 +338,7 @@ void test_cards_in_mask_returns_exact_cards() {
     mask = poker::add_card(mask, ace_spades);
     mask = poker::add_card(mask, two_clubs);
 
-    const std::vector<poker::CardId> cards =
-        poker::cards_in_mask(mask);
+    const std::vector<poker::CardId> cards = poker::cards_from_mask(mask);
 
     check_eq(
         static_cast<int>(cards.size()),
@@ -375,8 +374,7 @@ void test_remaining_cards_excludes_dead_cards() {
     dead = poker::add_card(dead, ace_spades);
     dead = poker::add_card(dead, king_hearts);
 
-    const std::vector<poker::CardId> remaining =
-        poker::remaining_cards(dead);
+    const std::vector<poker::CardId> remaining = poker::remaining_card_list(dead);
 
     check_eq(
         static_cast<int>(remaining.size()),
@@ -438,12 +436,14 @@ void test_full_mask_minus_board_and_hand() {
         "Full deck minus seven dead cards should leave 45 available cards."
     );
 
-    for (poker::CardId card : hand.cards()) {
-        check(
-            !poker::contains_card(available, card),
-            "Available cards should exclude hole cards."
-        );
-    }
+    check(
+        !poker::contains_card(available, hand.a),
+        "Available cards should exclude hole card a."
+    );
+    check(
+        !poker::contains_card(available, hand.b),
+        "Available cards should exclude hole card b."
+    );
 
     for (poker::CardId card : board.cards) {
         check(
@@ -469,7 +469,7 @@ void test_duplicate_hand_cards_throw_or_fail_validation() {
             ace_spades
         };
 
-        (void)poker::validate_hand(hand);
+        hand.validate();
     } catch (const std::exception&) {
         threw = true;
     }
@@ -499,7 +499,7 @@ void test_duplicate_board_cards_throw_or_fail_validation() {
             }
         };
 
-        (void)poker::validate_board(board);
+        board.validate();
     } catch (const std::exception&) {
         threw = true;
     }

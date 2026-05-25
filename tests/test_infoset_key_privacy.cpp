@@ -96,17 +96,17 @@ poker::holdem::PublicState make_public_state() {
     state.p0_stack = 2000;
     state.p1_stack = 2000;
 
-    state.p0_committed_this_round = 0;
-    state.p1_committed_this_round = 0;
-    state.current_bet_to_call = 0;
-    state.last_raise_size = 0;
-    state.num_raises_this_street = 0;
+    state.betting.p0_committed_this_round = 0;
+    state.betting.p1_committed_this_round = 0;
+    state.betting.current_bet_to_call = 0;
+    state.betting.last_raise_size = 0;
+    state.betting.num_raises_this_street = 0;
 
     state.player_to_act = poker::Player::P0;
-    state.last_aggressor = poker::Player::Chance;
+    state.betting.last_aggressor = poker::Player::Chance;
 
-    state.round_has_bet = false;
-    state.last_action_was_check = false;
+    state.betting.round_has_bet = false;
+    state.betting.last_action_was_check = false;
 
     state.terminal = false;
     state.terminal_reason = poker::holdem::TerminalReason::None;
@@ -136,7 +136,7 @@ std::string key_string(
             player,
             public_state,
             private_state,
-            nullptr
+            poker::holdem::ExactHandAbstraction()
         )
     );
 }
@@ -305,7 +305,7 @@ void test_key_changes_when_public_board_changes() {
     poker::holdem::PublicState pub_b = pub_a;
     pub_b.board = make_different_river_board();
 
-    const poker::PrivateState private_state = make_private_state(
+    const poker::holdem::PrivateState private_state = make_private_state(
         hand(
             c(poker::Rank::King, poker::Suit::Hearts),
             c(poker::Rank::Queen, poker::Suit::Hearts)
@@ -347,15 +347,15 @@ void test_key_changes_when_public_betting_history_changes() {
             500
         }
     );
-    pub_b.round_has_bet = true;
-    pub_b.current_bet_to_call = 500;
-    pub_b.p0_committed_this_round = 500;
+    pub_b.betting.round_has_bet = true;
+    pub_b.betting.current_bet_to_call = 500;
+    pub_b.betting.p0_committed_this_round = 500;
     pub_b.p0_stack = 1500;
     pub_b.pot = 1500;
     pub_b.player_to_act = poker::Player::P1;
-    pub_b.last_aggressor = poker::Player::P0;
+    pub_b.betting.last_aggressor = poker::Player::P0;
 
-    const poker::PrivateState private_state = make_private_state(
+    const poker::holdem::PrivateState private_state = make_private_state(
         hand(
             c(poker::Rank::King, poker::Suit::Hearts),
             c(poker::Rank::Queen, poker::Suit::Hearts)
@@ -393,9 +393,9 @@ void test_key_changes_when_stack_or_pot_state_changes() {
     poker::holdem::PublicState pub_b = pub_a;
     pub_b.pot = 1500;
     pub_b.p0_stack = 1500;
-    pub_b.p0_committed_this_round = 500;
+    pub_b.betting.p0_committed_this_round = 500;
 
-    const poker::PrivateState private_state = make_private_state(
+    const poker::holdem::PrivateState private_state = make_private_state(
         hand(
             c(poker::Rank::King, poker::Suit::Hearts),
             c(poker::Rank::Queen, poker::Suit::Hearts)
@@ -433,7 +433,7 @@ void test_key_changes_when_street_changes() {
     poker::holdem::PublicState pub_b = pub_a;
     pub_b.street = poker::holdem::Street::Turn;
 
-    const poker::PrivateState private_state = make_private_state(
+    const poker::holdem::PrivateState private_state = make_private_state(
         hand(
             c(poker::Rank::King, poker::Suit::Hearts),
             c(poker::Rank::Queen, poker::Suit::Hearts)
@@ -543,7 +543,7 @@ void test_key_string_does_not_contain_opponent_hand_literals_for_p1() {
 void test_key_rejects_non_acting_or_invalid_player() {
     const poker::holdem::PublicState pub = make_public_state();
 
-    const poker::PrivateState private_state = make_private_state(
+    const poker::holdem::PrivateState private_state = make_private_state(
         hand(
             c(poker::Rank::King, poker::Suit::Hearts),
             c(poker::Rank::Queen, poker::Suit::Hearts)
@@ -555,13 +555,12 @@ void test_key_rejects_non_acting_or_invalid_player() {
     );
 
     bool threw = false;
-
     try {
         (void)poker::holdem::make_infoset_key(
             poker::Player::Chance,
             pub,
             private_state,
-            nullptr
+            poker::holdem::ExactHandAbstraction()
         );
     } catch (const std::exception&) {
         threw = true;

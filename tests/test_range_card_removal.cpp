@@ -426,8 +426,7 @@ void test_legal_hand_pairs_exclude_board_blockers() {
         {p1_legal, 1.0f}
     });
 
-    const std::vector<poker::LegalHandPair> pairs =
-        poker::enumerate_legal_hand_pairs(p0_range, p1_range, board_dead);
+    const std::vector<poker::LegalHandPair> pairs = poker::legal_hand_pairs(p0_range, p1_range, board_dead);
 
     check_eq(
         static_cast<int>(pairs.size()),
@@ -482,8 +481,7 @@ void test_legal_hand_pairs_exclude_shared_private_cards() {
         {p1_disjoint, 1.0f}
     });
 
-    const std::vector<poker::LegalHandPair> pairs =
-        poker::enumerate_legal_hand_pairs(p0_range, p1_range, board_dead);
+    const std::vector<poker::LegalHandPair> pairs = poker::legal_hand_pairs(p0_range, p1_range, board_dead);
 
     check_eq(
         static_cast<int>(pairs.size()),
@@ -547,7 +545,7 @@ void test_legal_hand_pair_probabilities_normalize_to_one() {
     });
 
     const std::vector<poker::LegalHandPair> pairs =
-        poker::enumerate_legal_hand_pairs(p0_range, p1_range, board_dead);
+        poker::legal_hand_pairs(p0_range, p1_range, board_dead);
 
     check_near(
         probability_sum(pairs),
@@ -602,7 +600,7 @@ void test_legal_hand_pair_probabilities_follow_product_weights() {
     });
 
     const std::vector<poker::LegalHandPair> pairs =
-        poker::enumerate_legal_hand_pairs(p0_range, p1_range, board_dead);
+        poker::legal_hand_pairs(p0_range, p1_range, board_dead);
 
     // Product weights:
     //   p0_a/p1_a = 2 * 3 = 6
@@ -670,7 +668,7 @@ void test_pair_enumeration_throws_when_no_legal_pairs_remain() {
     bool threw = false;
 
     try {
-        (void)poker::enumerate_legal_hand_pairs(
+        (void)poker::legal_hand_pairs(
             p0_range,
             p1_range,
             board_dead
