@@ -11,15 +11,15 @@
 namespace poker {
 
 enum class HandCategory : int {
-    HighCard        = 0,
-    OnePair         = 1,
-    TwoPair         = 2,
-    ThreeOfAKind    = 3,
-    Straight        = 4,
-    Flush           = 5,
-    FullHouse       = 6,
-    FourOfAKind     = 7,
-    StraightFlush   = 8
+    HighCard        = 1,
+    OnePair         = 2,
+    TwoPair         = 3,
+    ThreeOfAKind    = 4,
+    Straight        = 5,
+    Flush           = 6,
+    FullHouse       = 7,
+    FourOfAKind     = 8,
+    StraightFlush   = 9
 };
 
 struct HandStrength {
@@ -104,10 +104,10 @@ public:
     // Requires:
     //   board.size() == 5
     //   no duplicate cards between hand and board
-    HandStrength evaluate_7(
+    static HandStrength evaluate_7(
         const HoleCards& hand,
         const Board& board
-    ) const;
+    ) ;
 
     HandStrength evaluate_7(
         HandId hand_id,
@@ -122,11 +122,11 @@ public:
     //   +1 if p0 wins
     //    0 if tie
     //   -1 if p1 wins
-    int compare_7(
+    static int compare_7(
         const HoleCards& p0_hand,
         const HoleCards& p1_hand,
         const Board& board
-    ) const;
+    ) ;
 
     int compare_7(
         HandId p0_hand,

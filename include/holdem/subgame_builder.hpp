@@ -20,12 +20,7 @@
 
 namespace poker::holdem {
 
-struct HoldemBuildContext {
-    Game game;
-
-    // String form of InfoSetKey -> infoset id.
-    std::unordered_map<std::string, int> infoset_key_to_id;
-};
+using HoldemBuildContext = BuildContext;
 
 class HoldemSubgameBuilder {
 public:
@@ -116,6 +111,13 @@ private:
         const PrivateState& private_state
     ) const;
 
+    int add_terminal_node(HoldemBuildContext &ctx, int parent_id, const GameAction &incoming_action,
+                          const PublicState &public_state, const PrivateState &private_state) const;
+
+    int add_terminal_node(HoldemBuildContext &ctx, int parent_id, const GameAction &incoming_action,
+                          const PublicState &public_state, const PrivateState &private_state,
+                          float chance_probability) const;
+
     int add_terminal_node_with_utility(
         HoldemBuildContext& ctx,
         int parent_id,
@@ -123,6 +125,9 @@ private:
         const PublicState& public_state,
         float utility_p0
     ) const;
+
+    int add_terminal_node_with_utility(HoldemBuildContext &ctx, int parent_id, const GameAction &incoming_action,
+                                       const PublicState &public_state, float utility_p0) const;
 
     // ---------------------------------------------------------------------
     // Infoset management

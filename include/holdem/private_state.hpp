@@ -8,6 +8,8 @@
 #include <stdexcept>
 #include <string>
 
+#include "poker/board.hpp"
+
 namespace poker::holdem {
 
 struct PrivateState {

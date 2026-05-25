@@ -54,13 +54,8 @@ add_library(kuhn_gpu_cfr_lib
         src/exploitability.cpp
         src/cfr_gpu.cpp
 
-        src/poker/card.cpp
-        src/poker/range.cpp
         src/poker/hand_evaluator.cpp
         src/holdem/betting_engine.cpp
-        src/holdem/chance_model.cpp
-        src/holdem/terminal_utility.cpp
-        src/holdem/infoset_key.cpp
         src/holdem/subgame_builder.cpp
 
         cuda/kernels.cu

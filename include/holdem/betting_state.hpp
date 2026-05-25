@@ -74,19 +74,21 @@ struct BettingState {
     }
 
     void set_committed(Player player, int amount) {
-        if (amount < 0) {
-            throw std::invalid_argument("Committed amount must be nonnegative.");
+        if (amount <= 0) {
+            throw std::invalid_argument("Committed amount must be greater than zero.");
         }
-
+        round_has_bet = true;
+        last_aggressor = player;
+        current_bet_to_call = amount;
         switch (player) {
             case Player::P0:
+                last_raise_size = amount - p0_committed_this_round;
                 p0_committed_this_round = amount;
                 return;
-
             case Player::P1:
+                last_raise_size = amount - p0_committed_this_round;
                 p1_committed_this_round = amount;
                 return;
-
             default:
                 throw std::invalid_argument(
                     "BettingState::set_committed requires P0 or P1."
@@ -127,15 +129,11 @@ struct BettingState {
     }
 
     int highest_commitment() const {
-        return p0_committed_this_round > p1_committed_this_round
-            ? p0_committed_this_round
-            : p1_committed_this_round;
+        return p0_committed_this_round > p1_committed_this_round ? p0_committed_this_round : p1_committed_this_round;
     }
 
     int lowest_commitment() const {
-        return p0_committed_this_round < p1_committed_this_round
-            ? p0_committed_this_round
-            : p1_committed_this_round;
+        return p0_committed_this_round < p1_committed_this_round ? p0_committed_this_round : p1_committed_this_round;
     }
 
     int outstanding_call_amount() const {
@@ -191,13 +189,13 @@ struct BettingState {
 
         if (current_bet_to_call < highest_commitment()) {
             throw std::invalid_argument(
-                "current_bet_to_call cannot be less than highest commitment."
+                "current_bet_to_call cannot be less than highest commitment: " + std::to_string(current_bet_to_call) + " instead of " + std::to_string(highest_commitment())
             );
         }
 
         if (current_bet_to_call > highest_commitment()) {
             throw std::invalid_argument(
-                "current_bet_to_call cannot exceed highest commitment."
+                "current_bet_to_call cannot exceed highest commitment: " + std::to_string(current_bet_to_call) + " instead of " + std::to_string(highest_commitment())
             );
         }
 
