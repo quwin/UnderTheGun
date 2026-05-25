@@ -31,19 +31,6 @@ enum class TerminalReason : int {
     AllInCalled = 3
 };
 
-// Helper declared early because it's used in this file
-inline Player opponent_of(Player player) {
-    if (player == Player::P0) {
-        return Player::P1;
-    }
-
-    if (player == Player::P1) {
-        return Player::P0;
-    }
-
-    throw std::invalid_argument("opponent_of() requires P0 or P1.");
-}
-
 struct PublicState {
     // -------------------------------------------------------------------------
     // Public board / street
@@ -189,7 +176,7 @@ struct PublicState {
     }
 
     Player opponent_of_player_to_act() const {
-        return opponent_of(player_to_act);
+        return poker::opponent_of(player_to_act);
     }
 
     // -------------------------------------------------------------------------

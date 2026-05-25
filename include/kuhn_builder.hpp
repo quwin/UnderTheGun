@@ -1,18 +1,27 @@
 #pragma once
 
 #include "game.hpp"
+#include "poker/card.hpp"
+#include "holdem/action.hpp"
 
 #include <string>
 #include <vector>
 
 namespace poker {
 
+enum class KuhnAction : int {
+    Check = 0,
+    Call = 1,
+    Raise = 2,
+    Fold = 3,
+};
+
 struct KuhnConfig {
     // Standard Kuhn uses J, Q, K.
-    std::vector<Card> deck = {
-        Card::Jack,
-        Card::Queen,
-        Card::King
+    std::vector<CardId> deck = {
+        make_card(Rank::Jack, Suit::Spades),
+        make_card(Rank::Queen, Suit::Spades),
+        make_card(Rank::King, Suit::Spades)
     };
 
     // Standard Kuhn has ante = 1 and one bet size = 1.
@@ -43,8 +52,8 @@ private:
         BuildContext& ctx,
         int parent_id,
         Player player_to_act,
-        Card p0_card,
-        Card p1_card,
+        CardId p0_card,
+        CardId p1_card,
         const std::string& history
     ) const;
 
@@ -52,9 +61,9 @@ private:
     int add_terminal_node(
         BuildContext& ctx,
         int parent_id,
-        Action incoming_action,
-        Card p0_card,
-        Card p1_card,
+        holdem::ActionType incoming_action,
+        CardId p0_card,
+        CardId p1_card,
         const std::string& terminal_history
     ) const;
 
@@ -62,21 +71,21 @@ private:
     int add_decision_node(
         BuildContext& ctx,
         int parent_id,
-        Action incoming_action,
+        holdem::ActionType incoming_action,
         Player player_to_act,
-        Card p0_card,
-        Card p1_card,
+        CardId p0_card,
+        CardId p1_card,
         const std::string& history
     ) const;
 
     // Kuhn rule helpers.
-    std::vector<Action> legal_actions(const std::string& history) const;
+    std::vector<holdem::ActionType> legal_actions(const std::string& history) const;
 
     bool is_terminal_history(const std::string& history) const;
 
     float terminal_utility_p0(
-        Card p0_card,
-        Card p1_card,
+        CardId p0_card,
+        CardId p1_card,
         const std::string& terminal_history
     ) const;
 
@@ -85,11 +94,11 @@ private:
         const std::string& new_history
     ) const;
 
-    Card private_card_for(Player player, Card p0_card, Card p1_card) const;
+    CardId private_card_for(Player player, CardId p0_card, CardId p1_card) const;
 
     std::string append_action(
         const std::string& history,
-        Action action
+        holdem::ActionType action
     ) const;
 };
 

@@ -58,12 +58,10 @@ struct HoldemSubgameConfig {
     // -------------------------------------------------------------------------
 
     // Exact by default.
-    std::shared_ptr<const HandAbstraction> hand_abstraction =
-        make_exact_hand_abstraction();
+    std::shared_ptr<const HandAbstraction> hand_abstraction = make_exact_hand_abstraction();
 
     // Exact by default.
-    std::shared_ptr<const BoardAbstraction> board_abstraction =
-        make_exact_board_abstraction();
+    std::shared_ptr<const BoardAbstraction> board_abstraction = make_exact_board_abstraction();
 
     // -------------------------------------------------------------------------
     // All-in handling

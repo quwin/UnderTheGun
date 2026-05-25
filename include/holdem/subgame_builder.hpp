@@ -2,256 +2,175 @@
 
 #include "game.hpp"
 
-#include "holdem/private_state.hpp"
-#include "holdem/public_state.hpp"
-#include "holdem/street.hpp"
+#include "action.hpp"
+#include "betting_engine.hpp"
+#include "chance_model.hpp"
+#include "infoset_key.hpp"
+#include "private_state.hpp"
+#include "public_state.hpp"
+#include "subgame_config.hpp"
+#include "terminal_utility.hpp"
 
-#include "poker/board.hpp"
 #include "poker/hand_evaluator.hpp"
 
-#include <stdexcept>
+#include <memory>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace poker::holdem {
 
-// -----------------------------------------------------------------------------
-// Terminal utility convention
-// -----------------------------------------------------------------------------
-//
-// Utility is expressed from P0's perspective.
-//
-// Subgame-net convention:
-//
-//   P0 wins pot:
-//     +pot - p0_committed_this_round
-//
-//   P0 loses at showdown:
-//     -p0_committed_this_round
-//
-//   P0 folds:
-//     -p0_committed_this_round
-//
-//   P1 folds:
-//     +pot - p0_committed_this_round
-//
-//   Tie:
-//     p0_share_of_pot - p0_committed_this_round
-//
-// This treats the starting pot as contestable value rather than as already
-// owned by either player.
+struct HoldemBuildContext {
+    Game game;
 
-inline float utility_p0_when_p0_wins(
-    const PublicState& state
-) {
-    return static_cast<float>(
-        state.pot - state.betting.p0_committed_this_round
-    );
-}
+    // String form of InfoSetKey -> infoset id.
+    std::unordered_map<std::string, int> infoset_key_to_id;
+};
 
-inline float utility_p0_when_p0_loses(
-    const PublicState& state
-) {
-    return static_cast<float>(
-        -state.betting.p0_committed_this_round
-    );
-}
+class HoldemSubgameBuilder {
+public:
+    explicit HoldemSubgameBuilder(HoldemSubgameConfig config);
 
-inline float utility_p0_when_tie(
-    const PublicState& state
-) {
-    const double half_pot =
-        static_cast<double>(state.pot) * 0.5;
+    // Builds the explicit extensive-form subgame tree.
+    Game build() const;
 
-    return static_cast<float>(
-        half_pot -
-        static_cast<double>(state.betting.p0_committed_this_round)
-    );
-}
+private:
+    HoldemSubgameConfig config_;
 
-// -----------------------------------------------------------------------------
-// Fold utility
-// -----------------------------------------------------------------------------
+    BettingEngine betting_engine_;
+    ChanceModel chance_model_;
+    HandEvaluator hand_evaluator_;
 
-inline float fold_terminal_utility_p0(
-    const PublicState& state
-) {
-    if (!state.terminal ||
-        state.terminal_reason != TerminalReason::Fold) {
-        throw std::invalid_argument(
-            "fold_terminal_utility_p0 requires a fold terminal state."
-        );
-    }
+    // ---------------------------------------------------------------------
+    // Top-level construction
+    // ---------------------------------------------------------------------
 
-    if (state.folded_player == Player::P0) {
-        return utility_p0_when_p0_loses(state);
-    }
+    int add_root_chance_node(
+        HoldemBuildContext& ctx
+    ) const;
 
-    if (state.folded_player == Player::P1) {
-        return utility_p0_when_p0_wins(state);
-    }
+    void add_private_deal_children(
+        HoldemBuildContext& ctx,
+        int root_id,
+        const PublicState& initial_public_state
+    ) const;
 
-    throw std::invalid_argument(
-        "Fold terminal must identify folded player."
-    );
-}
+    // ---------------------------------------------------------------------
+    // Recursive state expansion
+    // ---------------------------------------------------------------------
 
-// -----------------------------------------------------------------------------
-// Showdown utility
-// -----------------------------------------------------------------------------
+    void expand_state(
+        HoldemBuildContext& ctx,
+        int node_id,
+        const PublicState& public_state,
+        const PrivateState& private_state
+    ) const;
 
-inline float showdown_terminal_utility_p0(
-    const PublicState& state,
-    const PrivateState& private_state,
-    const HandEvaluator& evaluator
-) {
-    if (!state.terminal ||
-        state.terminal_reason != TerminalReason::Showdown) {
-        throw std::invalid_argument(
-            "showdown_terminal_utility_p0 requires a showdown terminal state."
-        );
-    }
+    void expand_decision_node(
+        HoldemBuildContext& ctx,
+        int node_id,
+        const PublicState& public_state,
+        const PrivateState& private_state
+    ) const;
 
-    if (state.street != Street::River) {
-        throw std::invalid_argument(
-            "Showdown terminal requires river street."
-        );
-    }
+    void expand_public_chance_node(
+        HoldemBuildContext& ctx,
+        int node_id,
+        const PublicState& public_state,
+        const PrivateState& private_state
+    ) const;
 
-    if (!state.board.is_river()) {
-        throw std::invalid_argument(
-            "Showdown terminal requires five-card board."
-        );
-    }
+    void expand_all_in_called_state(
+        HoldemBuildContext& ctx,
+        int node_id,
+        const PublicState& public_state,
+        const PrivateState& private_state
+    ) const;
 
-    private_state.validate();
+    // ---------------------------------------------------------------------
+    // Node creation
+    // ---------------------------------------------------------------------
 
-    if (private_state.overlaps_mask(board_mask(state.board))) {
-        throw std::invalid_argument(
-            "Private hands overlap public board."
-        );
-    }
+    int add_chance_node(
+        HoldemBuildContext& ctx,
+        int parent_id,
+        const Action& incoming_action,
+        float chance_probability,
+        const PublicState& public_state,
+        const PrivateState& private_state
+    ) const;
 
-    const int cmp = evaluator.compare_7(
-        private_state.p0_hand,
-        private_state.p1_hand,
-        state.board
-    );
+    int add_decision_node(
+        HoldemBuildContext& ctx,
+        int parent_id,
+        const Action& incoming_action,
+        const PublicState& public_state,
+        const PrivateState& private_state
+    ) const;
 
-    if (cmp > 0) {
-        return utility_p0_when_p0_wins(state);
-    }
+    int add_terminal_node(
+        HoldemBuildContext& ctx,
+        int parent_id,
+        const Action& incoming_action,
+        const PublicState& public_state,
+        const PrivateState& private_state
+    ) const;
 
-    if (cmp < 0) {
-        return utility_p0_when_p0_loses(state);
-    }
+    int add_terminal_node_with_utility(
+        HoldemBuildContext& ctx,
+        int parent_id,
+        const Action& incoming_action,
+        const PublicState& public_state,
+        float utility_p0
+    ) const;
 
-    return utility_p0_when_tie(state);
-}
+    // ---------------------------------------------------------------------
+    // Infoset management
+    // ---------------------------------------------------------------------
 
-// -----------------------------------------------------------------------------
-// All-in called utility
-// -----------------------------------------------------------------------------
-//
-// This function is intentionally strict: all-in called before river should
-// usually be handled by either:
-//   1. expanding future runouts as chance nodes, or
-//   2. using an AllInEquityResolver that averages all legal runouts.
-//
-// If the all-in call happens on the river, it is just showdown.
+    int get_or_create_infoset(
+        HoldemBuildContext& ctx,
+        Player player,
+        const PublicState& public_state,
+        const PrivateState& private_state,
+        const std::vector<Action>& legal_actions
+    ) const;
 
-inline float all_in_called_terminal_utility_p0(
-    const PublicState& state,
-    const PrivateState& private_state,
-    const HandEvaluator& evaluator
-) {
-    if (!state.terminal ||
-        state.terminal_reason != TerminalReason::AllInCalled) {
-        throw std::invalid_argument(
-            "all_in_called_terminal_utility_p0 requires an all-in-called terminal state."
-        );
-    }
+    InfoSetKey make_key(
+        Player player,
+        const PublicState& public_state,
+        const PrivateState& private_state
+    ) const;
 
-    if (state.street != Street::River) {
-        throw std::invalid_argument(
-            "Pre-river all-in EV should be resolved by runout expansion or AllInEquityResolver."
-        );
-    }
+    // ---------------------------------------------------------------------
+    // Street / terminal helpers
+    // ---------------------------------------------------------------------
 
-    PublicState showdown_state = state;
-    showdown_state.terminal_reason = TerminalReason::Showdown;
+    bool needs_public_chance_after_betting_round(
+        const PublicState& public_state
+    ) const;
 
-    return showdown_terminal_utility_p0(
-        showdown_state,
-        private_state,
-        evaluator
-    );
-}
+    bool should_go_to_showdown_after_betting_round(
+        const PublicState& public_state
+    ) const;
 
-// -----------------------------------------------------------------------------
-// Main terminal utility entry point
-// -----------------------------------------------------------------------------
+    Player first_player_to_act_on_next_street(
+        const PublicState& public_state
+    ) const;
 
-inline float terminal_utility_p0(
-    const PublicState& state,
-    const PrivateState& private_state,
-    const HandEvaluator& evaluator
-) {
-    state.validate();
-    private_state.validate();
+    PublicState make_showdown_state(
+        PublicState state
+    ) const;
 
-    if (!state.terminal) {
-        throw std::invalid_argument(
-            "terminal_utility_p0 requires a terminal PublicState."
-        );
-    }
+    // ---------------------------------------------------------------------
+    // Validation helpers
+    // ---------------------------------------------------------------------
 
-    switch (state.terminal_reason) {
-        case TerminalReason::Fold:
-            return fold_terminal_utility_p0(state);
+    void validate_config() const;
 
-        case TerminalReason::Showdown:
-            return showdown_terminal_utility_p0(
-                state,
-                private_state,
-                evaluator
-            );
-
-        case TerminalReason::AllInCalled:
-            return all_in_called_terminal_utility_p0(
-                state,
-                private_state,
-                evaluator
-            );
-
-        case TerminalReason::None:
-            break;
-    }
-
-    throw std::invalid_argument(
-        "Invalid terminal reason for terminal utility."
-    );
-}
-
-inline float terminal_utility_for_player(
-    const PublicState& state,
-    const PrivateState& private_state,
-    const HandEvaluator& evaluator,
-    Player player
-) {
-    const float utility_p0 =
-        terminal_utility_p0(state, private_state, evaluator);
-
-    if (player == Player::P0) {
-        return utility_p0;
-    }
-
-    if (player == Player::P1) {
-        return -utility_p0;
-    }
-
-    throw std::invalid_argument(
-        "terminal_utility_for_player requires P0 or P1."
-    );
-}
+    void validate_built_game(
+        const Game& game
+    ) const;
+};
 
 } // namespace poker::holdem
