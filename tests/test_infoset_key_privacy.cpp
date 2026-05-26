@@ -51,10 +51,6 @@ void check_ne(
     }
 }
 
-poker::CardId c(poker::Rank rank, poker::Suit suit) {
-    return poker::make_card(rank, suit);
-}
-
 poker::HoleCards hand(
     poker::CardId a,
     poker::CardId b
@@ -65,23 +61,34 @@ poker::HoleCards hand(
 poker::Board make_river_board() {
     return poker::Board{
         {
-            c(poker::Rank::Ace, poker::Suit::Spades),
-            c(poker::Rank::Seven, poker::Suit::Hearts),
-            c(poker::Rank::Two, poker::Suit::Clubs),
-            c(poker::Rank::Jack, poker::Suit::Diamonds),
-            c(poker::Rank::Four, poker::Suit::Spades)
+            poker::make_card(poker::Rank::Ace, poker::Suit::Spades),
+            poker::make_card(poker::Rank::Seven, poker::Suit::Hearts),
+            poker::make_card(poker::Rank::Two, poker::Suit::Clubs),
+            poker::make_card(poker::Rank::Jack, poker::Suit::Diamonds),
+            poker::make_card(poker::Rank::Four, poker::Suit::Spades)
         }
+    };
+}
+
+poker::Board make_turn_board() {
+    return poker::Board{
+            {
+                poker::make_card(poker::Rank::Ace, poker::Suit::Spades),
+                poker::make_card(poker::Rank::Seven, poker::Suit::Hearts),
+                poker::make_card(poker::Rank::Two, poker::Suit::Clubs),
+                poker::make_card(poker::Rank::Jack, poker::Suit::Diamonds),
+            }
     };
 }
 
 poker::Board make_different_river_board() {
     return poker::Board{
         {
-            c(poker::Rank::Ace, poker::Suit::Spades),
-            c(poker::Rank::Seven, poker::Suit::Hearts),
-            c(poker::Rank::Two, poker::Suit::Clubs),
-            c(poker::Rank::Jack, poker::Suit::Diamonds),
-            c(poker::Rank::King, poker::Suit::Spades)
+            poker::make_card(poker::Rank::Ace, poker::Suit::Spades),
+            poker::make_card(poker::Rank::Seven, poker::Suit::Hearts),
+            poker::make_card(poker::Rank::Two, poker::Suit::Clubs),
+            poker::make_card(poker::Rank::Jack, poker::Suit::Diamonds),
+            poker::make_card(poker::Rank::King, poker::Suit::Spades)
         }
     };
 }
@@ -96,22 +103,14 @@ poker::holdem::PublicState make_public_state() {
     state.p0_stack = 2000;
     state.p1_stack = 2000;
 
-    state.betting.p0_committed_this_round = 0;
-    state.betting.p1_committed_this_round = 0;
-    state.betting.current_bet_to_call = 0;
-    state.betting.last_raise_size = 0;
-    state.betting.num_raises_this_street = 0;
 
     state.player_to_act = poker::Player::P0;
-    state.betting.last_aggressor = poker::Player::Chance;
-
-    state.betting.round_has_bet = false;
-    state.betting.last_action_was_check = false;
 
     state.terminal = false;
     state.terminal_reason = poker::holdem::TerminalReason::None;
 
     state.action_history.clear();
+    state.betting.reset_for_new_street();
 
     return state;
 }
@@ -145,18 +144,18 @@ void test_p0_key_ignores_p1_private_hand() {
     const poker::holdem::PublicState pub = make_public_state();
 
     const poker::HoleCards p0_hand = hand(
-        c(poker::Rank::King, poker::Suit::Hearts),
-        c(poker::Rank::Queen, poker::Suit::Hearts)
+        poker::make_card(poker::Rank::King, poker::Suit::Hearts),
+        poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
     );
 
     const poker::HoleCards p1_hand_a = hand(
-        c(poker::Rank::Nine, poker::Suit::Clubs),
-        c(poker::Rank::Nine, poker::Suit::Diamonds)
+        poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
+        poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
     );
 
     const poker::HoleCards p1_hand_b = hand(
-        c(poker::Rank::Three, poker::Suit::Clubs),
-        c(poker::Rank::Three, poker::Suit::Diamonds)
+        poker::make_card(poker::Rank::Three, poker::Suit::Clubs),
+        poker::make_card(poker::Rank::Three, poker::Suit::Diamonds)
     );
 
     const std::string key_a = key_string(
@@ -185,18 +184,18 @@ void test_p1_key_ignores_p0_private_hand() {
     pub.player_to_act = poker::Player::P1;
 
     const poker::HoleCards p0_hand_a = hand(
-        c(poker::Rank::King, poker::Suit::Hearts),
-        c(poker::Rank::Queen, poker::Suit::Hearts)
+        poker::make_card(poker::Rank::King, poker::Suit::Hearts),
+        poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
     );
 
     const poker::HoleCards p0_hand_b = hand(
-        c(poker::Rank::Eight, poker::Suit::Clubs),
-        c(poker::Rank::Eight, poker::Suit::Diamonds)
+        poker::make_card(poker::Rank::Eight, poker::Suit::Clubs),
+        poker::make_card(poker::Rank::Eight, poker::Suit::Diamonds)
     );
 
     const poker::HoleCards p1_hand = hand(
-        c(poker::Rank::Nine, poker::Suit::Clubs),
-        c(poker::Rank::Nine, poker::Suit::Diamonds)
+        poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
+        poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
     );
 
     const std::string key_a = key_string(
@@ -224,18 +223,18 @@ void test_p0_key_changes_when_p0_private_hand_changes() {
     const poker::holdem::PublicState pub = make_public_state();
 
     const poker::HoleCards p0_hand_a = hand(
-        c(poker::Rank::King, poker::Suit::Hearts),
-        c(poker::Rank::Queen, poker::Suit::Hearts)
+        poker::make_card(poker::Rank::King, poker::Suit::Hearts),
+        poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
     );
 
     const poker::HoleCards p0_hand_b = hand(
-        c(poker::Rank::Ten, poker::Suit::Clubs),
-        c(poker::Rank::Ten, poker::Suit::Diamonds)
+        poker::make_card(poker::Rank::Ten, poker::Suit::Clubs),
+        poker::make_card(poker::Rank::Ten, poker::Suit::Diamonds)
     );
 
     const poker::HoleCards p1_hand = hand(
-        c(poker::Rank::Nine, poker::Suit::Clubs),
-        c(poker::Rank::Nine, poker::Suit::Diamonds)
+        poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
+        poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
     );
 
     const std::string key_a = key_string(
@@ -264,18 +263,18 @@ void test_p1_key_changes_when_p1_private_hand_changes() {
     pub.player_to_act = poker::Player::P1;
 
     const poker::HoleCards p0_hand = hand(
-        c(poker::Rank::King, poker::Suit::Hearts),
-        c(poker::Rank::Queen, poker::Suit::Hearts)
+        poker::make_card(poker::Rank::King, poker::Suit::Hearts),
+        poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
     );
 
     const poker::HoleCards p1_hand_a = hand(
-        c(poker::Rank::Nine, poker::Suit::Clubs),
-        c(poker::Rank::Nine, poker::Suit::Diamonds)
+        poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
+        poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
     );
 
     const poker::HoleCards p1_hand_b = hand(
-        c(poker::Rank::Three, poker::Suit::Clubs),
-        c(poker::Rank::Three, poker::Suit::Diamonds)
+        poker::make_card(poker::Rank::Three, poker::Suit::Clubs),
+        poker::make_card(poker::Rank::Three, poker::Suit::Diamonds)
     );
 
     const std::string key_a = key_string(
@@ -307,12 +306,12 @@ void test_key_changes_when_public_board_changes() {
 
     const poker::holdem::PrivateState private_state = make_private_state(
         hand(
-            c(poker::Rank::King, poker::Suit::Hearts),
-            c(poker::Rank::Queen, poker::Suit::Hearts)
+            poker::make_card(poker::Rank::King, poker::Suit::Hearts),
+            poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
         ),
         hand(
-            c(poker::Rank::Nine, poker::Suit::Clubs),
-            c(poker::Rank::Nine, poker::Suit::Diamonds)
+            poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
+            poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
         )
     );
 
@@ -347,9 +346,7 @@ void test_key_changes_when_public_betting_history_changes() {
             500
         }
     );
-    pub_b.betting.round_has_bet = true;
-    pub_b.betting.current_bet_to_call = 500;
-    pub_b.betting.p0_committed_this_round = 500;
+    pub_b.betting.add_committed(poker::Player::P0, 500);
     pub_b.p0_stack = 1500;
     pub_b.pot = 1500;
     pub_b.player_to_act = poker::Player::P1;
@@ -357,12 +354,12 @@ void test_key_changes_when_public_betting_history_changes() {
 
     const poker::holdem::PrivateState private_state = make_private_state(
         hand(
-            c(poker::Rank::King, poker::Suit::Hearts),
-            c(poker::Rank::Queen, poker::Suit::Hearts)
+            poker::make_card(poker::Rank::King, poker::Suit::Hearts),
+            poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
         ),
         hand(
-            c(poker::Rank::Nine, poker::Suit::Clubs),
-            c(poker::Rank::Nine, poker::Suit::Diamonds)
+            poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
+            poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
         )
     );
 
@@ -373,7 +370,7 @@ void test_key_changes_when_public_betting_history_changes() {
     );
 
     const std::string key_b = key_string(
-        poker::Player::P0,
+        poker::Player::P1,
         pub_b,
         private_state
     );
@@ -393,16 +390,16 @@ void test_key_changes_when_stack_or_pot_state_changes() {
     poker::holdem::PublicState pub_b = pub_a;
     pub_b.pot = 1500;
     pub_b.p0_stack = 1500;
-    pub_b.betting.p0_committed_this_round = 500;
+    pub_b.betting.set_committed(poker::Player::P0, 500);
 
     const poker::holdem::PrivateState private_state = make_private_state(
         hand(
-            c(poker::Rank::King, poker::Suit::Hearts),
-            c(poker::Rank::Queen, poker::Suit::Hearts)
+            poker::make_card(poker::Rank::King, poker::Suit::Hearts),
+            poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
         ),
         hand(
-            c(poker::Rank::Nine, poker::Suit::Clubs),
-            c(poker::Rank::Nine, poker::Suit::Diamonds)
+            poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
+            poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
         )
     );
 
@@ -432,15 +429,16 @@ void test_key_changes_when_street_changes() {
 
     poker::holdem::PublicState pub_b = pub_a;
     pub_b.street = poker::holdem::Street::Turn;
+    pub_b.board = make_turn_board();
 
     const poker::holdem::PrivateState private_state = make_private_state(
         hand(
-            c(poker::Rank::King, poker::Suit::Hearts),
-            c(poker::Rank::Queen, poker::Suit::Hearts)
+            poker::make_card(poker::Rank::King, poker::Suit::Hearts),
+            poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
         ),
         hand(
-            c(poker::Rank::Nine, poker::Suit::Clubs),
-            c(poker::Rank::Nine, poker::Suit::Diamonds)
+            poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
+            poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
         )
     );
 
@@ -469,13 +467,13 @@ void test_key_string_does_not_contain_opponent_hand_literals_for_p0() {
     const poker::holdem::PublicState pub = make_public_state();
 
     const poker::HoleCards p0_hand = hand(
-        c(poker::Rank::King, poker::Suit::Hearts),
-        c(poker::Rank::Queen, poker::Suit::Hearts)
+        poker::make_card(poker::Rank::King, poker::Suit::Hearts),
+        poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
     );
 
     const poker::HoleCards p1_hand = hand(
-        c(poker::Rank::Nine, poker::Suit::Clubs),
-        c(poker::Rank::Nine, poker::Suit::Diamonds)
+        poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
+        poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
     );
 
     const std::string key = key_string(
@@ -507,13 +505,13 @@ void test_key_string_does_not_contain_opponent_hand_literals_for_p1() {
     pub.player_to_act = poker::Player::P1;
 
     const poker::HoleCards p0_hand = hand(
-        c(poker::Rank::King, poker::Suit::Hearts),
-        c(poker::Rank::Queen, poker::Suit::Hearts)
+        poker::make_card(poker::Rank::King, poker::Suit::Hearts),
+        poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
     );
 
     const poker::HoleCards p1_hand = hand(
-        c(poker::Rank::Nine, poker::Suit::Clubs),
-        c(poker::Rank::Nine, poker::Suit::Diamonds)
+        poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
+        poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
     );
 
     const std::string key = key_string(
@@ -545,12 +543,12 @@ void test_key_rejects_non_acting_or_invalid_player() {
 
     const poker::holdem::PrivateState private_state = make_private_state(
         hand(
-            c(poker::Rank::King, poker::Suit::Hearts),
-            c(poker::Rank::Queen, poker::Suit::Hearts)
+            poker::make_card(poker::Rank::King, poker::Suit::Hearts),
+            poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
         ),
         hand(
-            c(poker::Rank::Nine, poker::Suit::Clubs),
-            c(poker::Rank::Nine, poker::Suit::Diamonds)
+            poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
+            poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
         )
     );
 

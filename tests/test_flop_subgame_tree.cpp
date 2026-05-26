@@ -136,7 +136,7 @@ poker::holdem::HoldemSubgameConfig make_test_config() {
     config.board = make_test_flop_board();
 
     config.pot_size = 1000;
-    config.effective_stack = 2000;
+    config.effective_stack = 100000;
     config.player_to_act = poker::Player::P0;
 
     config.p0_range = make_tiny_p0_range();
@@ -183,12 +183,13 @@ int count_chance_nodes(const poker::Game& game) {
     return count_nodes_with_player(game, poker::Player::Chance);
 }
 
-bool has_action_type(const poker::InfoSet& infoset,poker::holdem::ActionType action_type) {
-    return std::find(
-        infoset.actions.begin(),
-        infoset.actions.end(),
-        action_type
-    ) != infoset.actions.end();
+bool has_action_type(const poker::InfoSet& infoset, poker::holdem::ActionType action_type) {
+    for (const poker::GameAction action : infoset.actions) {
+        if (action.action_type == static_cast<int>(action_type)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void test_flop_subgame_builds_nonempty_tree() {
@@ -435,11 +436,11 @@ void test_infosets_do_not_encode_opponent_private_hand() {
         );
 
         check(
-            !infoset.public_history.empty(),
+            !infoset.key.empty(),
             "Hold'em infoset should contain public history key."
         );
 
-        public_key_to_infosets[infoset.public_history].insert(infoset.id);
+        public_key_to_infosets[infoset.key].insert(infoset.id);
     }
 
     check(

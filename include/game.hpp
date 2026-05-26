@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -521,7 +522,7 @@ inline void validate_game_basic_shape(const Game& game) {
 
             if (child.depth != node.depth + 1) {
                 throw std::invalid_argument(
-                    "Child depth must equal parent depth + 1."
+                    "Child depth must equal parent depth + 1 | Child Depth: " + std::to_string(child.depth) + " | Parent Depth: " + std::to_string(node.depth)
                 );
             }
         }

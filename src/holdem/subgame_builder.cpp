@@ -7,71 +7,100 @@
 #include <vector>
 
 namespace poker::holdem {
-    namespace {
+namespace {
 
-        GameAction to_game_action(const Action& action) {
-            return GameAction{
-                static_cast<int>(action.type),
-                action.amount,
-                action_history_token(action)
-            };
+    GameAction to_game_action(const Action& action) {
+        return GameAction{
+            static_cast<int>(action.type),
+            action.amount,
+            action_history_token(action)
+        };
+    }
+
+    GameAction private_deal_game_action(
+        const PrivateState& private_state
+    ) {
+        return GameAction{
+            0,
+            0,
+            "private_deal:" + poker::holdem::to_string(private_state)
+        };
+    }
+
+    GameAction public_board_game_action(
+        const Board& board
+    ) {
+        return GameAction{
+            0,
+            0,
+            "deal_board:" + poker::to_string(board)
+        };
+    }
+
+    GameAction synthetic_action_label(const std::string& label) {
+        return GameAction{0, 0, label};
+    }
+
+    std::vector<GameAction> to_game_actions(
+        const std::vector<Action>& actions
+    ) {
+        std::vector<GameAction> result;
+        result.reserve(actions.size());
+
+        for (const Action& action : actions) {
+            result.push_back(to_game_action(action));
         }
 
-        GameAction private_deal_game_action(
-            const PrivateState& private_state
-        ) {
-            return GameAction{
-                0,
-                0,
-                "private_deal:" + poker::holdem::to_string(private_state)
-            };
+        return result;
+    }
+
+    PublicState clear_terminal_all_in_marker(PublicState state) {
+        if (state.terminal_reason != TerminalReason::AllInCalled) {
+            throw std::invalid_argument(
+                "Expected AllInCalled state."
+            );
         }
 
-        GameAction public_board_game_action(
-            const Board& board
-        ) {
-            return GameAction{
-                0,
-                0,
-                "deal_board:" + poker::to_string(board)
-            };
-        }
+        state.terminal = false;
+        state.terminal_reason = TerminalReason::None;
+        state.player_to_act = Player::P0;
+        state.folded_player = Player::Terminal;
+        state.winner = Player::Terminal;
 
-        GameAction synthetic_action_label(const std::string& label) {
-            return GameAction{0, 0, label};
-        }
+        return state;
+    }
 
-        std::vector<GameAction> to_game_actions(
-            const std::vector<Action>& actions
-        ) {
-            std::vector<GameAction> result;
-            result.reserve(actions.size());
+    int add_node_and_link(
+        poker::BuildContext& ctx,
+        int parent_id,
+        poker::Node node
+    ) {
+                node.parent = parent_id;
 
-            for (const Action& action : actions) {
-                result.push_back(to_game_action(action));
-            }
+                const int node_id = ctx.add_node(node);
 
-            return result;
-        }
+                if (parent_id >= 0) {
+                    ctx.add_child(parent_id, node_id);
+                }
 
-        PublicState clear_terminal_all_in_marker(PublicState state) {
-            if (state.terminal_reason != TerminalReason::AllInCalled) {
-                throw std::invalid_argument(
-                    "Expected AllInCalled state."
-                );
-            }
+                return node_id;
+    }
 
-            state.terminal = false;
-            state.terminal_reason = TerminalReason::None;
-            state.player_to_act = Player::P0;
-            state.folded_player = Player::Terminal;
-            state.winner = Player::Terminal;
+} // namespace
 
-            return state;
-        }
-
-    } // namespace
-
+    InfoSetKey HoldemSubgameBuilder::make_key(
+        Player player,
+        const PublicState& public_state,
+        const PrivateState& private_state
+    ) const {
+        return make_infoset_key(
+            player,
+            public_state,
+            private_state,
+            *config_.hand_abstraction,
+            config_.board_abstraction.get()
+        );
+    }
     HoldemSubgameBuilder::HoldemSubgameBuilder(
         HoldemSubgameConfig config
     )
@@ -103,12 +132,11 @@ namespace poker::holdem {
     }
 
     int HoldemSubgameBuilder::add_root_chance_node(
-        HoldemBuildContext& ctx
+        BuildContext& ctx
     ) const {
         Node root;
 
         root.parent = -1;
-        root.depth = 0;
         root.player = Player::Chance;
         root.infoset = -1;
         root.incoming_action = chance_deal_action();
@@ -116,21 +144,12 @@ namespace poker::holdem {
         root.terminal = false;
         root.utility_p0 = 0.0f;
 
-        const int root_id = ctx.game.nodes.empty()
-            ? static_cast<int>(ctx.game.nodes.size())
-            : -1;
+        const int root_id = ctx.add_node(root);
 
-        if (root_id != 0) {
-            throw std::logic_error("Root node should be first node.");
-        }
-
-        root.id = 0;
-        ctx.game.nodes.push_back(root);
-        ctx.game.root = 0;
+        ctx.game.root = root_id;
         ctx.game.num_players = 2;
-        ctx.game.max_depth = 0;
 
-        return 0;
+        return root_id;
     }
 
     void HoldemSubgameBuilder::add_private_deal_children(
@@ -144,25 +163,18 @@ namespace poker::holdem {
         for (const PrivateDealOutcome& deal : deals) {
             Node child;
 
-            child.parent = root_id;
-            child.depth = ctx.game.node(root_id).depth + 1;
             child.player = initial_public_state.player_to_act;
             child.infoset = -1;
-            child.incoming_action =
-                private_deal_game_action(deal.private_state);
+            child.incoming_action = private_deal_game_action(deal.private_state);
             child.chance_prob = deal.probability;
             child.terminal = false;
             child.utility_p0 = 0.0f;
 
-            child.id = static_cast<int>(ctx.game.nodes.size());
-            ctx.game.nodes.push_back(child);
-            ctx.game.node(root_id).children.push_back(child.id);
-            ctx.game.max_depth =
-                std::max(ctx.game.max_depth, child.depth);
+            const int child_id = add_node_and_link(ctx, root_id, child);
 
             expand_state(
                 ctx,
-                child.id,
+                child_id,
                 initial_public_state,
                 deal.private_state
             );
@@ -177,9 +189,11 @@ namespace poker::holdem {
     ) const {
         public_state.validate();
         private_state.validate();
+
         if (public_state.terminal) {
             return;
         }
+
         if (betting_engine_.betting_round_closed(public_state)) {
             if (should_go_to_showdown_after_betting_round(public_state)) {
                 PublicState showdown = make_showdown_state(public_state);
@@ -198,8 +212,6 @@ namespace poker::holdem {
             if (needs_public_chance_after_betting_round(public_state)) {
                 Node chance_node;
 
-                chance_node.parent = node_id;
-                chance_node.depth = ctx.game.node(node_id).depth + 1;
                 chance_node.player = Player::Chance;
                 chance_node.infoset = -1;
                 chance_node.incoming_action =
@@ -208,15 +220,12 @@ namespace poker::holdem {
                 chance_node.terminal = false;
                 chance_node.utility_p0 = 0.0f;
 
-                chance_node.id = static_cast<int>(ctx.game.nodes.size());
-                ctx.game.nodes.push_back(chance_node);
-                ctx.game.node(node_id).children.push_back(chance_node.id);
-                ctx.game.max_depth =
-                    std::max(ctx.game.max_depth, chance_node.depth);
+                const int chance_id =
+                    add_node_and_link(ctx, node_id, chance_node);
 
                 expand_public_chance_node(
                     ctx,
-                    chance_node.id,
+                    chance_id,
                     public_state,
                     private_state
                 );
@@ -239,15 +248,15 @@ namespace poker::holdem {
         const PublicState& public_state,
         const PrivateState& private_state
     ) const {
-        Node& node = ctx.game.node(node_id);
+        const Player node_player = ctx.game.node(node_id).player;
 
-        if (node.player != Player::P0 && node.player != Player::P1) {
+        if (node_player != Player::P0 && node_player != Player::P1) {
             throw std::logic_error(
                 "expand_decision_node requires a real-player node."
             );
         }
 
-        if (public_state.player_to_act != node.player) {
+        if (public_state.player_to_act != node_player) {
             throw std::logic_error(
                 "PublicState player_to_act does not match decision node player."
             );
@@ -260,12 +269,10 @@ namespace poker::holdem {
             );
 
         if (legal_actions.empty()) {
-            throw std::logic_error(
-                "Decision node has no legal actions."
-            );
+            throw std::logic_error("Decision node has no legal actions.");
         }
 
-        node.infoset =
+        const int infoset_id =
             get_or_create_infoset(
                 ctx,
                 public_state.player_to_act,
@@ -274,9 +281,10 @@ namespace poker::holdem {
                 legal_actions
             );
 
+        ctx.game.node(node_id).infoset = infoset_id;
+
         for (const Action& action : legal_actions) {
-            PublicState next_public =
-                betting_engine_.apply_action(public_state, action);
+            PublicState next_public = betting_engine_.apply_action(public_state, action);
 
             if (next_public.terminal &&
                 next_public.terminal_reason == TerminalReason::AllInCalled) {
@@ -288,8 +296,6 @@ namespace poker::holdem {
 
                 Node all_in_chance;
 
-                all_in_chance.parent = node_id;
-                all_in_chance.depth = node.depth + 1;
                 all_in_chance.player = Player::Chance;
                 all_in_chance.infoset = -1;
                 all_in_chance.incoming_action = to_game_action(action);
@@ -297,21 +303,18 @@ namespace poker::holdem {
                 all_in_chance.terminal = false;
                 all_in_chance.utility_p0 = 0.0f;
 
-                all_in_chance.id = static_cast<int>(ctx.game.nodes.size());
-                ctx.game.nodes.push_back(all_in_chance);
-                ctx.game.node(node_id).children.push_back(all_in_chance.id);
-                ctx.game.max_depth =
-                    std::max(ctx.game.max_depth, all_in_chance.depth);
+                const int all_in_chance_id =
+                    add_node_and_link(ctx, node_id, all_in_chance);
 
                 expand_all_in_called_state(
                     ctx,
-                    all_in_chance.id,
+                    all_in_chance_id,
                     next_public,
                     private_state
                 );
 
                 continue;
-                }
+            }
 
             if (next_public.terminal) {
                 add_terminal_node(
@@ -325,10 +328,50 @@ namespace poker::holdem {
                 continue;
             }
 
+            // IMPORTANT: handle closed nonterminal betting rounds here.
+            // River: action directly creates showdown terminal.
+            // Flop/turn: action creates a public-card chance node.
+            if (betting_engine_.betting_round_closed(next_public)) {
+                if (should_go_to_showdown_after_betting_round(next_public)) {
+                    PublicState showdown = make_showdown_state(next_public);
+
+                    add_terminal_node(
+                        ctx,
+                        node_id,
+                        action,
+                        showdown,
+                        private_state
+                    );
+
+                    continue;
+                }
+
+                if (needs_public_chance_after_betting_round(next_public)) {
+                    Node chance_node;
+
+                    chance_node.player = Player::Chance;
+                    chance_node.infoset = -1;
+                    chance_node.incoming_action = to_game_action(action);
+                    chance_node.chance_prob = 0.0f;
+                    chance_node.terminal = false;
+                    chance_node.utility_p0 = 0.0f;
+
+                    const int chance_id =
+                        add_node_and_link(ctx, node_id, chance_node);
+
+                    expand_public_chance_node(
+                        ctx,
+                        chance_id,
+                        next_public,
+                        private_state
+                    );
+
+                    continue;
+                }
+            }
+
             Node child;
 
-            child.parent = node_id;
-            child.depth = node.depth + 1;
             child.player = next_public.player_to_act;
             child.infoset = -1;
             child.incoming_action = to_game_action(action);
@@ -336,15 +379,12 @@ namespace poker::holdem {
             child.terminal = false;
             child.utility_p0 = 0.0f;
 
-            child.id = static_cast<int>(ctx.game.nodes.size());
-            ctx.game.nodes.push_back(child);
-            ctx.game.node(node_id).children.push_back(child.id);
-            ctx.game.max_depth =
-                std::max(ctx.game.max_depth, child.depth);
+            const int child_id =
+                add_node_and_link(ctx, node_id, child);
 
             expand_state(
                 ctx,
-                child.id,
+                child_id,
                 next_public,
                 private_state
             );
@@ -357,9 +397,7 @@ namespace poker::holdem {
         const PublicState& public_state,
         const PrivateState& private_state
     ) const {
-        Node& chance_node = ctx.game.node(node_id);
-
-        if (chance_node.player != Player::Chance) {
+        if (ctx.game.node(node_id).player != Player::Chance) {
             throw std::logic_error(
                 "expand_public_chance_node requires a chance node."
             );
@@ -376,10 +414,16 @@ namespace poker::holdem {
             );
 
         for (const PublicBoardOutcome& outcome : outcomes) {
+            if (betting_engine_.betting_round_closed(outcome.public_state)) {
+                throw std::logic_error(
+                    "Public-card chance produced a next-street state whose betting "
+                    "round is already closed. Did you forget to reset BettingState "
+                    "when advancing streets?"
+                );
+            }
+
             Node child;
 
-            child.parent = node_id;
-            child.depth = chance_node.depth + 1;
             child.player = outcome.public_state.player_to_act;
             child.infoset = -1;
             child.incoming_action =
@@ -388,15 +432,12 @@ namespace poker::holdem {
             child.terminal = false;
             child.utility_p0 = 0.0f;
 
-            child.id = static_cast<int>(ctx.game.nodes.size());
-            ctx.game.nodes.push_back(child);
-            chance_node.children.push_back(child.id);
-            ctx.game.max_depth =
-                std::max(ctx.game.max_depth, child.depth);
+            const int child_id =
+                add_node_and_link(ctx, node_id, child);
 
             expand_state(
                 ctx,
-                child.id,
+                child_id,
                 outcome.public_state,
                 private_state
             );
@@ -414,7 +455,13 @@ namespace poker::holdem {
             throw std::logic_error(
                 "expand_all_in_called_state requires AllInCalled terminal marker."
             );
-            }
+        }
+
+        if (ctx.game.node(node_id).player != Player::Chance) {
+            throw std::logic_error(
+                "All-in runout expansion must occur from a chance node."
+            );
+        }
 
         if (public_state.street == Street::River) {
             PublicState showdown = public_state;
@@ -447,14 +494,6 @@ namespace poker::holdem {
                 arbitrary_next_to_act
             );
 
-        Node& chance_node = ctx.game.node(node_id);
-
-        if (chance_node.player != Player::Chance) {
-            throw std::logic_error(
-                "All-in runout expansion must occur from a chance node."
-            );
-        }
-
         for (const PublicBoardOutcome& outcome : outcomes) {
             if (outcome.public_state.street == Street::River) {
                 PublicState showdown = outcome.public_state;
@@ -463,13 +502,14 @@ namespace poker::holdem {
                 showdown.player_to_act = Player::Terminal;
                 showdown.folded_player = Player::Terminal;
                 showdown.winner = Player::Terminal;
-                // TODO: What do I do with outcome.probability
+
                 add_terminal_node(
                     ctx,
                     node_id,
                     public_board_game_action(outcome.public_state.board),
                     showdown,
-                    private_state
+                    private_state,
+                    outcome.probability
                 );
 
                 continue;
@@ -484,8 +524,6 @@ namespace poker::holdem {
 
             Node child_chance;
 
-            child_chance.parent = node_id;
-            child_chance.depth = chance_node.depth + 1;
             child_chance.player = Player::Chance;
             child_chance.infoset = -1;
             child_chance.incoming_action =
@@ -494,15 +532,12 @@ namespace poker::holdem {
             child_chance.terminal = false;
             child_chance.utility_p0 = 0.0f;
 
-            child_chance.id = static_cast<int>(ctx.game.nodes.size());
-            ctx.game.nodes.push_back(child_chance);
-            chance_node.children.push_back(child_chance.id);
-            ctx.game.max_depth =
-                std::max(ctx.game.max_depth, child_chance.depth);
+            const int child_chance_id =
+                add_node_and_link(ctx, node_id, child_chance);
 
             expand_all_in_called_state(
                 ctx,
-                child_chance.id,
+                child_chance_id,
                 next_all_in,
                 private_state
             );
@@ -519,8 +554,6 @@ namespace poker::holdem {
     ) const {
         Node node;
 
-        node.parent = parent_id;
-        node.depth = ctx.game.node(parent_id).depth + 1;
         node.player = Player::Chance;
         node.infoset = -1;
         node.incoming_action = to_game_action(incoming_action);
@@ -528,16 +561,10 @@ namespace poker::holdem {
         node.terminal = false;
         node.utility_p0 = 0.0f;
 
-        node.id = static_cast<int>(ctx.game.nodes.size());
-        ctx.game.nodes.push_back(node);
-        ctx.game.node(parent_id).children.push_back(node.id);
-        ctx.game.max_depth =
-            std::max(ctx.game.max_depth, node.depth);
-
         (void)public_state;
         (void)private_state;
 
-        return node.id;
+        return add_node_and_link(ctx, parent_id, node);
     }
 
     int HoldemSubgameBuilder::add_decision_node(
@@ -549,8 +576,6 @@ namespace poker::holdem {
     ) const {
         Node node;
 
-        node.parent = parent_id;
-        node.depth = ctx.game.node(parent_id).depth + 1;
         node.player = public_state.player_to_act;
         node.infoset = -1;
         node.incoming_action = to_game_action(incoming_action);
@@ -558,15 +583,9 @@ namespace poker::holdem {
         node.terminal = false;
         node.utility_p0 = 0.0f;
 
-        node.id = static_cast<int>(ctx.game.nodes.size());
-        ctx.game.nodes.push_back(node);
-        ctx.game.node(parent_id).children.push_back(node.id);
-        ctx.game.max_depth =
-            std::max(ctx.game.max_depth, node.depth);
-
         (void)private_state;
 
-        return node.id;
+        return add_node_and_link(ctx, parent_id, node);
     }
 
     int HoldemSubgameBuilder::add_terminal_node(
@@ -623,10 +642,14 @@ namespace poker::holdem {
                 hand_evaluator_
             );
 
+        if (!public_state.terminal) {
+            throw std::invalid_argument(
+                "add_terminal_node requires terminal PublicState."
+            );
+        }
+
         Node node;
 
-        node.parent = parent_id;
-        node.depth = ctx.game.node(parent_id).depth + 1;
         node.player = Player::Terminal;
         node.infoset = -1;
         node.incoming_action = incoming_action;
@@ -634,13 +657,7 @@ namespace poker::holdem {
         node.terminal = true;
         node.utility_p0 = utility;
 
-        node.id = static_cast<int>(ctx.game.nodes.size());
-        ctx.game.nodes.push_back(node);
-        ctx.game.node(parent_id).children.push_back(node.id);
-        ctx.game.max_depth =
-            std::max(ctx.game.max_depth, node.depth);
-
-        return node.id;
+        return add_node_and_link(ctx, parent_id, node);
     }
 
     int HoldemSubgameBuilder::add_terminal_node_with_utility(
@@ -674,8 +691,6 @@ namespace poker::holdem {
 
         Node node;
 
-        node.parent = parent_id;
-        node.depth = ctx.game.node(parent_id).depth + 1;
         node.player = Player::Terminal;
         node.infoset = -1;
         node.incoming_action = incoming_action;
@@ -683,22 +698,16 @@ namespace poker::holdem {
         node.terminal = true;
         node.utility_p0 = utility_p0;
 
-        node.id = static_cast<int>(ctx.game.nodes.size());
-        ctx.game.nodes.push_back(node);
-        ctx.game.node(parent_id).children.push_back(node.id);
-        ctx.game.max_depth =
-            std::max(ctx.game.max_depth, node.depth);
-
-        return node.id;
+        return add_node_and_link(ctx, parent_id, node);
     }
 
     int HoldemSubgameBuilder::get_or_create_infoset(
-    HoldemBuildContext& ctx,
-    Player player,
-    const PublicState& public_state,
-    const PrivateState& private_state,
-    const std::vector<Action>& legal_actions
-) const {
+        HoldemBuildContext& ctx,
+        Player player,
+        const PublicState& public_state,
+        const PrivateState& private_state,
+        const std::vector<Action>& legal_actions
+    ) const {
         const InfoSetKey key =
             make_key(
                 player,
@@ -706,26 +715,18 @@ namespace poker::holdem {
                 private_state
             );
 
+        const std::string serialized_key =
+            to_string(key);
+
+        const std::vector<GameAction> actions =
+            to_game_actions(legal_actions);
+
         return ctx.get_or_create_infoset(
             player,
-            to_string(key),
-            to_game_actions(legal_actions)
+            serialized_key,
+            actions
         );
     }
-    InfoSetKey HoldemSubgameBuilder::make_key(
-        Player player,
-        const PublicState& public_state,
-        const PrivateState& private_state
-    ) const {
-        return make_infoset_key(
-            player,
-            public_state,
-            private_state,
-            *config_.hand_abstraction,
-            config_.board_abstraction.get()
-        );
-    }
-
     bool HoldemSubgameBuilder::needs_public_chance_after_betting_round(
         const PublicState& public_state
     ) const {

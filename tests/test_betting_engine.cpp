@@ -88,22 +88,32 @@ poker::holdem::BettingAbstraction make_test_abstraction() {
     return abstraction;
 }
 
+poker::Board test_river_board() {
+return poker::Board{
+        {
+            poker::make_card(poker::Rank::Ace, poker::Suit::Spades),
+            poker::make_card(poker::Rank::Seven, poker::Suit::Hearts),
+            poker::make_card(poker::Rank::Two, poker::Suit::Clubs),
+            poker::make_card(poker::Rank::Jack, poker::Suit::Diamonds),
+            poker::make_card(poker::Rank::Four, poker::Suit::Spades)
+        }
+};
+}
+
 poker::holdem::PublicState make_initial_river_state() {
     poker::holdem::PublicState state;
 
     state.street = poker::holdem::Street::River;
+    state.board = test_river_board();
     state.pot = kStartingPot;
+
     state.p0_stack = kStartingStack;
     state.p1_stack = kStartingStack;
-    state.betting.p0_committed_this_round = 0;
-    state.betting.p1_committed_this_round = 0;
-    state.betting.current_bet_to_call = 0;
-    state.betting.last_raise_size = 0;
-    state.betting.num_raises_this_street = 0;
+
     state.player_to_act = poker::Player::P0;
-    state.betting.last_aggressor = poker::Player::Chance;
-    state.betting.round_has_bet = false;
-    state.betting.last_action_was_check = false;
+
+    state.betting.reset_for_new_street();
+
     state.terminal = false;
     state.terminal_reason = poker::holdem::TerminalReason::None;
     state.action_history.clear();
@@ -138,13 +148,11 @@ poker::holdem::Action find_action(
 
 void test_unopened_pot_has_check_and_bets() {
     const poker::holdem::BettingEngine engine;
-    const poker::holdem::BettingAbstraction abstraction =
-        make_test_abstraction();
+    const poker::holdem::BettingAbstraction abstraction = make_test_abstraction();
 
     const poker::holdem::PublicState state = make_initial_river_state();
 
-    const std::vector<poker::holdem::Action> actions =
-        engine.legal_actions(state, abstraction);
+    const std::vector<poker::holdem::Action> actions = engine.legal_actions(state, abstraction);
 
     check(
         has_action_type(actions, poker::holdem::ActionType::Check),
@@ -434,26 +442,26 @@ void test_raise_updates_call_amount_and_raise_count() {
         poker::holdem::Action{poker::holdem::ActionType::Raise, 1250}
     );
 
-    check_eq(state.pot, 2250, "Raise-to 1250 should add 1250 chips from P1.");
+    check_eq(state.pot, 2750, "Raise 1250 should add 1250 chips from P1.");
     check_eq(state.p0_stack, 1500, "P0 stack should still reflect original 500 bet.");
-    check_eq(state.p1_stack, 750, "P1 stack should subtract raise-to amount.");
+    check_eq(state.p1_stack, 750, "P1 stack should subtract raise amount.");
 
     check_eq(
         state.betting.p1_committed_this_round,
         1250,
-        "P1 committed amount should equal raise-to amount."
+        "P1 committed amount should equal raise amount."
     );
 
     check_eq(
         state.betting.current_bet_to_call,
         1250,
-        "Current bet to call should be the raised-to amount."
+        "Current bet to call should be the raised amount."
     );
 
     check_eq(
         state.betting.last_raise_size,
         750,
-        "Last raise size should be raise-to amount minus previous bet."
+        "Last raise size should be raise amount minus previous bet."
     );
 
     check_eq(

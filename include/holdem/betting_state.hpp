@@ -8,6 +8,7 @@
 namespace poker::holdem {
 
 struct BettingState {
+    int actions_this_street = 0;
     // Chips committed by each player during this street only.
     int p0_committed_this_round = 0;
     int p1_committed_this_round = 0;
@@ -151,6 +152,8 @@ struct BettingState {
         round_has_bet = false;
         last_action_was_check = false;
         last_aggressor = Player::Chance;
+
+        actions_this_street = 0;
     }
 
     void validate() const {

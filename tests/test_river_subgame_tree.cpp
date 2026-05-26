@@ -61,18 +61,14 @@ void check_near(
     }
 }
 
-poker::CardId c(poker::Rank rank, poker::Suit suit) {
-    return poker::make_card(rank, suit);
-}
-
 poker::Board make_test_river_board() {
     return poker::Board{
         {
-            c(poker::Rank::Ace, poker::Suit::Spades),
-            c(poker::Rank::Seven, poker::Suit::Hearts),
-            c(poker::Rank::Two, poker::Suit::Clubs),
-            c(poker::Rank::Jack, poker::Suit::Diamonds),
-            c(poker::Rank::Four, poker::Suit::Spades)
+            poker::make_card(poker::Rank::Ace, poker::Suit::Spades),
+            poker::make_card(poker::Rank::Seven, poker::Suit::Hearts),
+            poker::make_card(poker::Rank::Two, poker::Suit::Clubs),
+            poker::make_card(poker::Rank::Jack, poker::Suit::Diamonds),
+            poker::make_card(poker::Rank::Four, poker::Suit::Spades)
         }
     };
 }
@@ -83,16 +79,16 @@ poker::Range make_tiny_p0_range() {
 
     range.set_weight(
         poker::make_hand(
-            c(poker::Rank::King, poker::Suit::Hearts),
-            c(poker::Rank::Queen, poker::Suit::Hearts)
+            poker::make_card(poker::Rank::King, poker::Suit::Hearts),
+            poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
         ),
         1.0f
     );
 
     range.set_weight(
         poker::make_hand(
-            c(poker::Rank::King, poker::Suit::Spades),
-            c(poker::Rank::King, poker::Suit::Diamonds)
+            poker::make_card(poker::Rank::King, poker::Suit::Spades),
+            poker::make_card(poker::Rank::King, poker::Suit::Diamonds)
         ),
         1.0f
     );
@@ -106,16 +102,16 @@ poker::Range make_tiny_p1_range() {
 
     range.set_weight(
         poker::make_hand(
-            c(poker::Rank::Queen, poker::Suit::Clubs),
-            c(poker::Rank::Queen, poker::Suit::Diamonds)
+            poker::make_card(poker::Rank::Queen, poker::Suit::Clubs),
+            poker::make_card(poker::Rank::Queen, poker::Suit::Diamonds)
         ),
         1.0f
     );
 
     range.set_weight(
         poker::make_hand(
-            c(poker::Rank::Ten, poker::Suit::Hearts),
-            c(poker::Rank::Nine, poker::Suit::Hearts)
+            poker::make_card(poker::Rank::Ten, poker::Suit::Hearts),
+            poker::make_card(poker::Rank::Nine, poker::Suit::Hearts)
         ),
         1.0f
     );
@@ -200,15 +196,13 @@ int count_nodes_with_player(
     return count;
 }
 
-bool has_action_type(
-    const poker::InfoSet& infoset,
-    poker::holdem::ActionType action_type
-) {
-    return std::find(
-        infoset.actions.begin(),
-        infoset.actions.end(),
-        action_type
-    ) != infoset.actions.end();
+bool has_action_type(const poker::InfoSet& infoset, poker::holdem::ActionType action_type) {
+    for (const poker::GameAction action : infoset.actions) {
+        if (action.action_type == static_cast<int>(action_type)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void test_river_subgame_builds_nonempty_tree() {
@@ -600,7 +594,7 @@ void test_infoset_keys_do_not_obviously_encode_opponent_hand() {
     const poker::Game game = build_test_game();
 
     for (const poker::InfoSet& infoset : game.infosets) {
-        const std::string& key = infoset.public_history;
+        const std::string& key = infoset.key;
 
         check(
             key.find("opponent") == std::string::npos,

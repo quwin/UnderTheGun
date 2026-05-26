@@ -152,7 +152,7 @@ poker::holdem::HoldemSubgameConfig make_test_config() {
     config.board = make_test_turn_board();
 
     config.pot_size = 1000;
-    config.effective_stack = 2000;
+    config.effective_stack = 200000;
     config.player_to_act = poker::Player::P0;
 
     config.p0_range = make_tiny_p0_range();
@@ -198,15 +198,13 @@ int count_nodes_with_player(
     return count;
 }
 
-bool has_action_type(
-    const poker::InfoSet& infoset,
-    poker::holdem::ActionType action_type
-) {
-    return std::find(
-        infoset.actions.begin(),
-        infoset.actions.end(),
-        action_type
-    ) != infoset.actions.end();
+bool has_action_type(const poker::InfoSet& infoset, poker::holdem::ActionType action_type) {
+    for (const poker::GameAction action : infoset.actions) {
+        if (action.action_type == static_cast<int>(action_type)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void test_turn_subgame_builds_nonempty_tree() {
@@ -518,17 +516,13 @@ void test_infoset_action_sets_are_reasonable() {
     bool saw_facing_bet_infoset = false;
 
     for (const poker::InfoSet& infoset : game.infosets) {
-        const bool has_check =
-            has_action_type(infoset, poker::holdem::ActionType::Check);
+        const bool has_check = has_action_type(infoset, poker::holdem::ActionType::Check);
 
-        const bool has_bet =
-            has_action_type(infoset, poker::holdem::ActionType::Bet);
+        const bool has_bet = has_action_type(infoset, poker::holdem::ActionType::Bet);
 
-        const bool has_call =
-            has_action_type(infoset, poker::holdem::ActionType::Call);
+        const bool has_call = has_action_type(infoset, poker::holdem::ActionType::Call);
 
-        const bool has_fold =
-            has_action_type(infoset, poker::holdem::ActionType::Fold);
+        const bool has_fold = has_action_type(infoset, poker::holdem::ActionType::Fold);
 
         if (has_check || has_bet) {
             check(
@@ -648,7 +642,7 @@ void test_infoset_keys_do_not_obviously_encode_opponent_hand() {
     const poker::Game game = build_test_game();
 
     for (const poker::InfoSet& infoset : game.infosets) {
-        const std::string& key = infoset.public_history;
+        const std::string& key = infoset.key;
 
         check(
             key.find("opponent") == std::string::npos,

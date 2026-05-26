@@ -315,47 +315,19 @@ PublicState BettingEngine::apply_action(
     throw std::invalid_argument("Unknown action type.");
 }
 
-bool BettingEngine::betting_round_closed(
-    const PublicState& state
-) const {
-    state.validate();
-
-    if (state.terminal) {
-        return true;
-    }
-
-    if (state.action_history.empty()) {
-        return false;
-    }
-
-    if (!state.betting.round_has_bet) {
-        if (state.action_history.size() < 2) {
-            return false;
+    bool BettingEngine::betting_round_closed(
+        const PublicState& state
+    ) const {
+        state.validate();
+        if (state.terminal) {
+            return true;
+        }
+        if (!state.betting.round_has_bet) {
+            return state.betting.actions_this_street >= 2 && state.betting.last_action_was_check;
         }
 
-        const Action& last =
-            state.action_history[state.action_history.size() - 1];
-
-        const Action& previous =
-            state.action_history[state.action_history.size() - 2];
-
-        return previous.type == ActionType::Check &&
-               last.type == ActionType::Check;
+    return state.betting.current_bet_to_call > 0 && state.betting.commitments_matched();
     }
-
-    const Action& last = state.action_history.back();
-
-    if (last.type == ActionType::Call) {
-        return state.betting.commitments_matched();
-    }
-
-    if (last.type == ActionType::AllIn &&
-        state.betting.commitments_matched()) {
-        return true;
-    }
-
-    return false;
-}
 
 bool BettingEngine::is_fold_terminal(
     const PublicState& state
@@ -717,6 +689,7 @@ void BettingEngine::append_action_history(
     const Action& action
 ) const {
     state.action_history.push_back(action);
+    ++state.betting.actions_this_street;
 }
 
 void BettingEngine::validate_action_basic(

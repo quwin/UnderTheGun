@@ -609,14 +609,14 @@ void test_best_full_house_uses_highest_trips_then_highest_pair() {
 
     check_eq(
         strength.ranks[0],
-        static_cast<int>(poker::Rank::King),
-        "Best full house should use kings as trips."
+        static_cast<int>(poker::Rank::Ace),
+        "Best full house should use Aces as trips."
     );
 
     check_eq(
         strength.ranks[1],
-        static_cast<int>(poker::Rank::Ace),
-        "Best full house should use aces as pair."
+        static_cast<int>(poker::Rank::King),
+        "Best full house should use Kings as pair."
     );
 
     std::cout << "[pass] test_best_full_house_uses_highest_trips_then_highest_pair\n";
