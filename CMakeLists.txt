@@ -15,6 +15,30 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_ARCHITECTURES native CACHE STRING "CUDA architectures" FORCE)
 
 find_package(CUDAToolkit REQUIRED)
+
+# ---------------------------------------------------------------------------
+# PokerHandEvaluator
+# ---------------------------------------------------------------------------
+
+set(BUILD_CARD5 OFF CACHE BOOL "" FORCE)
+set(BUILD_CARD6 OFF CACHE BOOL "" FORCE)
+set(BUILD_CARD7 OFF  CACHE BOOL "" FORCE)
+set(BUILD_PLO4 OFF CACHE BOOL "" FORCE)
+set(BUILD_PLO5 OFF CACHE BOOL "" FORCE)
+set(BUILD_PLO6 OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+
+add_subdirectory(external/PokerHandEvaluator/cpp pheval EXCLUDE_FROM_ALL)
+
+get_target_property(PHEVAL_OPTIONS pheval INTERFACE_COMPILE_OPTIONS)
+if (PHEVAL_OPTIONS)
+    list(REMOVE_ITEM PHEVAL_OPTIONS "-O3")
+    set_target_properties(pheval PROPERTIES
+            INTERFACE_COMPILE_OPTIONS "${PHEVAL_OPTIONS}"
+    )
+endif()
+
 # ------------------------------------------------------------------------------
 # Core project library
 # ------------------------------------------------------------------------------
@@ -75,6 +99,7 @@ target_compile_features(kuhn_gpu_cfr_lib
 
 target_link_libraries(kuhn_gpu_cfr_lib
         PRIVATE
+        pheval
         CUDA::cudart
 )
 
@@ -139,18 +164,6 @@ add_test(
         COMMAND test_deck_mask
 )
 
-add_executable(test_flop_subgame_tree
-        tests/test_flop_subgame_tree.cpp
-)
-target_link_libraries(test_flop_subgame_tree
-        PRIVATE
-        kuhn_gpu_cfr_lib
-)
-add_test(
-        NAME test_flop_subgame_tree
-        COMMAND test_flop_subgame_tree
-)
-
 add_executable(test_hand_evaluator
         tests/test_hand_evaluator.cpp
 )
@@ -186,6 +199,28 @@ add_test(
         NAME test_range_card_removal
         COMMAND test_range_card_removal
 )
+add_executable(test_terminal_utility
+        tests/test_terminal_utility.cpp
+)
+target_link_libraries(test_terminal_utility
+        PRIVATE
+        kuhn_gpu_cfr_lib
+)
+add_test(
+        NAME test_terminal_utility
+        COMMAND test_terminal_utility
+)
+add_executable(test_holdem_gpu
+        tests/test_holdem_gpu.cpp
+)
+target_link_libraries(test_holdem_gpu
+        PRIVATE
+        kuhn_gpu_cfr_lib
+)
+add_test(
+        NAME test_holdem_gpu
+        COMMAND test_holdem_gpu
+)
 add_executable(test_river_subgame_tree
         tests/test_river_subgame_tree.cpp
 )
@@ -209,15 +244,14 @@ add_test(
         NAME test_turn_subgame_tree
         COMMAND test_turn_subgame_tree
 )
-
-add_executable(test_terminal_utility
-        tests/test_terminal_utility.cpp
+add_executable(test_flop_subgame_tree
+        tests/test_flop_subgame_tree.cpp
 )
-target_link_libraries(test_terminal_utility
+target_link_libraries(test_flop_subgame_tree
         PRIVATE
         kuhn_gpu_cfr_lib
 )
 add_test(
-        NAME test_terminal_utility
-        COMMAND test_terminal_utility
+        NAME test_flop_subgame_tree
+        COMMAND test_flop_subgame_tree
 )

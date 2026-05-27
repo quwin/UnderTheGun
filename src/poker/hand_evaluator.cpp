@@ -1,5 +1,6 @@
 #include "poker/hand_evaluator.hpp"
 #include "poker/deck_mask.hpp"
+#include "../external/PokerHandEvaluator/cpp/include/phevaluator/phevaluator.h"
 
 #include <algorithm>
 #include <array>
@@ -7,9 +8,60 @@
 #include <string>
 #include <vector>
 
-namespace poker {
-namespace {
+#include "../../external/PokerHandEvaluator/cpp/include/phevaluator/rank.h"
 
+namespace phevaluator {
+    class Rank;
+}
+
+namespace poker {
+
+namespace {
+    constexpr std::uint32_t kPheWeakestRank = 7462;
+
+    int to_phe_card_id(CardId card) {
+        validate_card(card);
+
+        const int rank_index = static_cast<int>(rank_of(card)) - 2; // 2..A -> 0..12
+        const int suit_index = static_cast<int>(suit_of(card));     // C,D,H,S -> 0..3
+
+        return rank_index * 4 + suit_index;
+    }
+
+    phevaluator::Card to_phe_card(CardId card) {
+        return {to_phe_card_id(card)};
+    }
+
+    std::uint32_t phe_score_from_rank(const phevaluator::Rank& rank) {
+        // PHEvaluator: 1 is strongest, 7462 is weakest.
+        // Your project: higher score means stronger.
+        return kPheWeakestRank + 1U - static_cast<std::uint32_t>(rank.value());
+    }
+
+    HandCategory category_from_phe(const phevaluator::Rank& rank) {
+        switch (rank.category()) {
+            case rank_category::STRAIGHT_FLUSH:
+                return HandCategory::StraightFlush;
+            case FOUR_OF_A_KIND:
+                return HandCategory::FourOfAKind;
+            case FULL_HOUSE:
+                return HandCategory::FullHouse;
+            case FLUSH:
+                return HandCategory::Flush;
+            case STRAIGHT:
+                return HandCategory::Straight;
+            case THREE_OF_A_KIND:
+                return HandCategory::ThreeOfAKind;
+            case TWO_PAIR:
+                return HandCategory::TwoPair;
+            case ONE_PAIR:
+                return HandCategory::OnePair;
+            case HIGH_CARD:
+                return HandCategory::HighCard;
+        }
+
+        throw std::runtime_error("Unknown PHEvaluator rank category.");
+    }
     std::array<CardId, 7> make_seven_cards(
         const HoleCards& hand,
         const Board& board
@@ -246,14 +298,27 @@ namespace {
 }
 
 } // namespace
-    // Checks all 21 (7choose5) 5-card hand combinations, and keeps the best one
     HandStrength HandEvaluator::evaluate_7(
         const HoleCards& hand,
         const Board& board
     ) {
         const std::array<CardId, 7> cards = make_seven_cards(hand, board);
+        const phevaluator::Rank phe_rank = phevaluator::EvaluateCards(
+            to_phe_card(cards[0]),
+            to_phe_card(cards[1]),
+            to_phe_card(cards[2]),
+            to_phe_card(cards[3]),
+            to_phe_card(cards[4]),
+            to_phe_card(cards[5]),
+            to_phe_card(cards[6])
+        );
+
+        // Keep your existing detailed category/ranks behavior for tests/debugging.
+        // This still does 21 choose-5 work, but only once per terminal construction.
+        // compare_7 below will use the fast PHEvaluator score.
         bool have_best = false;
         HandStrength best;
+
         for (int a = 0; a < 7; ++a) {
             for (int b = a + 1; b < 7; ++b) {
                 for (int c = b + 1; c < 7; ++c) {
@@ -266,7 +331,9 @@ namespace {
                                 cards[d],
                                 cards[e]
                             };
+
                             const HandStrength current = evaluate_5(subset);
+
                             if (!have_best || current > best) {
                                 best = current;
                                 have_best = true;
@@ -276,8 +343,12 @@ namespace {
                 }
             }
         }
-        return best;
-    }
+
+    best.category = category_from_phe(phe_rank);
+    best.score = phe_score_from_rank(phe_rank);
+
+    return best;
+}
 
     // Returns:
     //   +1 if p0 wins
@@ -288,10 +359,31 @@ namespace {
         const HoleCards& p1_hand,
         const Board& board
     ) {
-        const HandStrength p0 = evaluate_7(p0_hand, board);
-        const HandStrength p1 = evaluate_7(p1_hand, board);
-
-        return compare_hand_strength(p0, p1);
+        const phevaluator::Rank p0_rank = phevaluator::EvaluateCards(
+            to_phe_card(p0_hand.a),
+            to_phe_card(p0_hand.b),
+            to_phe_card(board.cards[0]),
+            to_phe_card(board.cards[3]),
+            to_phe_card(board.cards[4]),
+            to_phe_card(board.cards[5]),
+            to_phe_card(board.cards[6])
+        );
+        const phevaluator::Rank p1_rank = phevaluator::EvaluateCards(
+            to_phe_card(p1_hand.a),
+            to_phe_card(p1_hand.b),
+            to_phe_card(board.cards[0]),
+            to_phe_card(board.cards[3]),
+            to_phe_card(board.cards[4]),
+            to_phe_card(board.cards[5]),
+            to_phe_card(board.cards[6])
+        );
+        if (p0_rank.value() > p1_rank.value()) {
+            return 1;
+        }
+        if (p1_rank.value() > p0_rank.value()) {
+            return -1;
+        }
+        return 0;
     }
 
     // Utility helpers.

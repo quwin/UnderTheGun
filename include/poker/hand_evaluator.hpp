@@ -83,11 +83,11 @@ inline int compare_hand_strength(
     const HandStrength& a,
     const HandStrength& b
 ) {
-    if (a > b) {
+    if (a.score > b.score) {
         return 1;
     }
 
-    if (b > a) {
+    if (b.score > a.score) {
         return -1;
     }
 
