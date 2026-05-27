@@ -319,7 +319,7 @@ struct BuildContext {
             node.depth = parent.depth + 1;
         }
 
-        game.max_depth = std::max(game.max_depth, node.depth);
+        game.max_depth = std::max<int>(game.max_depth, node.depth);
 
         game.nodes.push_back(std::move(node));
 
@@ -342,7 +342,7 @@ struct BuildContext {
 
         if (child.depth != parent.depth + 1) {
             child.depth = parent.depth + 1;
-            game.max_depth = std::max(game.max_depth, child.depth);
+            game.max_depth = std::max<int>(game.max_depth, child.depth);
         }
 
         parent.children.push_back(child_id);

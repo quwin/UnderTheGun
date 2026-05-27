@@ -14,8 +14,72 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 set(CMAKE_CUDA_ARCHITECTURES native CACHE STRING "CUDA architectures" FORCE)
 
+# 3. Find dependencies
 find_package(CUDAToolkit REQUIRED)
 
+# ---- GUI executable ----
+set(FLTK_DIR "C:/fltk-1.4.5/build")
+find_package(FLTK 1.4 REQUIRED CONFIG)
+
+add_library(gui_library
+    src/gui/components/CardButton.cpp
+    src/gui/components/CardButton.hh
+    src/gui/components/ComboStrategyDisplay.cpp
+    src/gui/components/ComboStrategyDisplay.hh
+    src/gui/components/Page1_Settings.cpp
+    src/gui/components/Page1_Settings.hh
+    src/gui/components/Page2_Board.cpp
+    src/gui/components/Page2_Board.hh
+    src/gui/components/Page3_HeroRange.cpp
+    src/gui/components/Page3_HeroRange.hh
+    src/gui/components/Page4_VillainRange.cpp
+    src/gui/components/Page4_VillainRange.hh
+    src/gui/components/Page5_Progress.cpp
+    src/gui/components/Page5_Progress.hh
+    src/gui/components/Page6_Strategy.cpp
+    src/gui/components/Page6_Strategy.hh
+    src/gui/utils/Colors.hh
+    src/gui/utils/EmbeddedLogo.hh
+    src/gui/utils/MemoryUtil.hh
+)
+
+target_link_libraries(gui_library
+        PRIVATE
+        fltk::fltk
+        fltk::images
+)
+
+
+add_executable(under_the_gun_gui
+        src/gui/gui.cpp
+)
+
+target_include_directories(under_the_gun_gui
+        PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/gui
+        ${FLTK_INCLUDE_DIR}
+)
+
+target_link_libraries(under_the_gun_gui
+        PRIVATE
+        kuhn_gpu_cfr_lib
+        gui_library
+        fltk::fltk
+        fltk::images
+)
+
+if (WIN32)
+    target_link_libraries(under_the_gun_gui
+            PRIVATE
+            dwmapi
+            comctl32
+            gdi32
+            user32
+            ole32
+            uuid
+    )
+endif()
 # ---------------------------------------------------------------------------
 # PokerHandEvaluator
 # ---------------------------------------------------------------------------

@@ -11,3 +11,4 @@
 /cmake-build-cuda129/*
 /cmake-build-debug-coverage/*
 /.idea/*
+/bin/*
