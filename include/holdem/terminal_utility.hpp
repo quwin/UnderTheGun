@@ -7,10 +7,12 @@
 #include "holdem/street.hpp"
 
 #include "poker/board.hpp"
-#include "poker/hand_evaluator.hpp"
 
 #include <stdexcept>
 #include <string>
+
+#include "../../external/PokerHandEvaluator/cpp/include/phevaluator/phevaluator.h"
+#include "../../external/PokerHandEvaluator/cpp/include/phevaluator/rank.h"
 
 namespace poker::holdem {
 
@@ -101,8 +103,7 @@ inline float fold_terminal_utility_p0(
 
 inline float showdown_terminal_utility_p0(
     const PublicState& state,
-    const PrivateState& private_state,
-    const HandEvaluator& evaluator
+    const PrivateState& private_state
 ) {
     if (!state.terminal ||
         state.terminal_reason != TerminalReason::Showdown) {
@@ -131,20 +132,32 @@ inline float showdown_terminal_utility_p0(
         );
     }
 
-    const int cmp = evaluator.compare_7(
-        private_state.p0_hand,
-        private_state.p1_hand,
-        state.board
-    );
+    const phevaluator::Rank p0_rank = phevaluator::EvaluateCards(
+        private_state.p0_hand.a,
+        private_state.p0_hand.b,
+        state.board.cards[0],
+        state.board.cards[1],
+        state.board.cards[2],
+        state.board.cards[3],
+        state.board.cards[4]
+        );
 
-    if (cmp > 0) {
+    const phevaluator::Rank p1_rank = phevaluator::EvaluateCards(
+        private_state.p1_hand.a,
+        private_state.p1_hand.b,
+        state.board.cards[0],
+        state.board.cards[1],
+        state.board.cards[2],
+        state.board.cards[3],
+        state.board.cards[4]
+        );
+    // Smaller value is stronger, from 1 to 7462
+    if (p0_rank < p1_rank) {
         return utility_p0_when_p0_wins(state);
     }
-
-    if (cmp < 0) {
+    else if (p1_rank < p0_rank) {
         return utility_p0_when_p0_loses(state);
     }
-
     return utility_p0_when_tie(state);
 }
 
@@ -161,8 +174,7 @@ inline float showdown_terminal_utility_p0(
 
 inline float all_in_called_terminal_utility_p0(
     const PublicState& state,
-    const PrivateState& private_state,
-    const HandEvaluator& evaluator
+    const PrivateState& private_state
 ) {
     if (!state.terminal ||
         state.terminal_reason != TerminalReason::AllInCalled) {
@@ -182,8 +194,7 @@ inline float all_in_called_terminal_utility_p0(
 
     return showdown_terminal_utility_p0(
         showdown_state,
-        private_state,
-        evaluator
+        private_state
     );
 }
 
@@ -193,8 +204,7 @@ inline float all_in_called_terminal_utility_p0(
 
 inline float terminal_utility_p0(
     const PublicState& state,
-    const PrivateState& private_state,
-    const HandEvaluator& evaluator
+    const PrivateState& private_state
 ) {
     state.validate();
     private_state.validate();
@@ -212,15 +222,13 @@ inline float terminal_utility_p0(
         case TerminalReason::Showdown:
             return showdown_terminal_utility_p0(
                 state,
-                private_state,
-                evaluator
+                private_state
             );
 
         case TerminalReason::AllInCalled:
             return all_in_called_terminal_utility_p0(
                 state,
-                private_state,
-                evaluator
+                private_state
             );
 
         case TerminalReason::None:
@@ -235,20 +243,17 @@ inline float terminal_utility_p0(
 inline float terminal_utility_for_player(
     const PublicState& state,
     const PrivateState& private_state,
-    const HandEvaluator& evaluator,
     Player player
 ) {
     const float utility_p0 =
-        terminal_utility_p0(state, private_state, evaluator);
-
+        terminal_utility_p0(state, private_state
+    );
     if (player == Player::P0) {
         return utility_p0;
     }
-
     if (player == Player::P1) {
         return -utility_p0;
     }
-
     throw std::invalid_argument(
         "terminal_utility_for_player requires P0 or P1."
     );

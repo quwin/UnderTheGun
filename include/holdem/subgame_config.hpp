@@ -13,7 +13,6 @@
 
 #include <memory>
 #include <stdexcept>
-#include <string>
 
 namespace poker::holdem {
 

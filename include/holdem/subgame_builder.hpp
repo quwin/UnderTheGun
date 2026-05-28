@@ -9,13 +9,8 @@
 #include "private_state.hpp"
 #include "public_state.hpp"
 #include "subgame_config.hpp"
-#include "terminal_utility.hpp"
+#include "all_in_equity_cache.hpp"
 
-#include "poker/hand_evaluator.hpp"
-
-#include <memory>
-#include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace poker::holdem {
@@ -25,25 +20,21 @@ using HoldemBuildContext = BuildContext;
 class HoldemSubgameBuilder {
 public:
     explicit HoldemSubgameBuilder(HoldemSubgameConfig config);
-
     // Builds the explicit extensive-form subgame tree.
-    Game build() const;
-
+    [[nodiscard]] Game build() const;
 private:
     HoldemSubgameConfig config_;
 
     BettingEngine betting_engine_;
     ChanceModel chance_model_;
-    HandEvaluator hand_evaluator_;
-
+    mutable AllInEquityCache all_in_equity_cache_;
     // ---------------------------------------------------------------------
     // Top-level construction
     // ---------------------------------------------------------------------
-
-    int add_root_chance_node(
+    static int add_root_chance_node(
         HoldemBuildContext& ctx
-    ) const;
-
+    ) ;
+    float compute_equity(const Board& board,Street street, const PrivateState& private_state);
     void add_private_deal_children(
         HoldemBuildContext& ctx,
         int root_id,

@@ -3,7 +3,7 @@
 #include "holdem/street.hpp"
 
 #include "poker/board.hpp"
-#include "poker/card.hpp"
+#include "../../external/PokerHandEvaluator/cpp/include/phevaluator/card.h"
 #include "poker/deck_mask.hpp"
 
 #include <memory>
@@ -120,7 +120,7 @@ public:
         DeckMask unavailable = dead_cards | board_mask(current_board);
         validate_deck_mask(unavailable);
 
-        const std::vector<CardId> available_cards =
+        const std::vector<phevaluator::Card> available_cards =
             cards_from_mask(remaining_cards(unavailable));
 
         if (available_cards.empty()) {
@@ -135,7 +135,7 @@ public:
         std::vector<BoardTransition> transitions;
         transitions.reserve(available_cards.size());
 
-        for (CardId card : available_cards) {
+        for (phevaluator::Card card : available_cards) {
             Board next_board = current_board.with_added_card(card);
 
             if (!board_size_matches_street(next, next_board.size())) {

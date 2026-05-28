@@ -6,7 +6,8 @@
 
 #include "poker/board.hpp"
 #include "poker/hand.hpp"
-#include "poker/hand_evaluator.hpp"
+#include "../../external/PokerHandEvaluator/cpp/include/phevaluator/phevaluator.h"
+#include "../../external/PokerHandEvaluator/cpp/include/phevaluator/rank.h"
 
 #include <memory>
 #include <stdexcept>
@@ -17,6 +18,10 @@ namespace poker::holdem {
 using HandBucketId = int;
 
 constexpr HandBucketId kInvalidHandBucket = -1;
+
+inline HandBucketId bucket_id_from_rank(const phevaluator::Rank rank) {
+    return rank.category();
+};
 
 // -----------------------------------------------------------------------------
 // HandAbstraction
@@ -169,12 +174,7 @@ public:
 
 class RiverStrengthHandAbstraction final : public BucketedHandAbstraction {
 public:
-    explicit RiverStrengthHandAbstraction(
-        HandEvaluator evaluator = HandEvaluator{}
-    )
-        : evaluator_(std::move(evaluator)) {}
-
-    HandBucketId bucket_for(
+    [[nodiscard]] HandBucketId bucket_for(
         Player player,
         const HoleCards& private_hand,
         const Board& board,
@@ -185,13 +185,11 @@ public:
                 "RiverStrengthHandAbstraction requires P0 or P1."
             );
         }
-
         if (street != Street::River) {
             throw std::invalid_argument(
                 "RiverStrengthHandAbstraction only supports river boards."
             );
         }
-
         board.validate();
         private_hand.validate();
 
@@ -200,19 +198,23 @@ public:
                 "RiverStrengthHandAbstraction requires a five-card board."
             );
         }
-
         if (hand_overlaps_mask(private_hand, board_mask(board))) {
             throw std::invalid_argument(
                 "Private hand overlaps public board."
             );
         }
+        const phevaluator::Rank hand_rank = phevaluator::EvaluateCards(
+            private_hand.a,
+            private_hand.b,
+            board.cards[0],
+            board.cards[1],
+            board.cards[2],
+            board.cards[3],
+            board.cards[4]
+            );
 
-        const HandStrength strength =
-            evaluator_.evaluate_7(private_hand, board);
-
-        return static_cast<HandBucketId>(strength.category);
+        return bucket_id_from_rank(hand_rank);
     }
-
     int num_buckets(Street street) const override {
         if (street != Street::River) {
             throw std::invalid_argument(
@@ -222,9 +224,6 @@ public:
 
         return 9;
     }
-
-private:
-    HandEvaluator evaluator_;
 };
 
 // -----------------------------------------------------------------------------
@@ -236,7 +235,7 @@ private:
 
 class NullBucketedHandAbstraction final : public BucketedHandAbstraction {
 public:
-    HandBucketId bucket_for(
+    [[nodiscard]] HandBucketId bucket_for(
         Player player,
         const HoleCards& private_hand,
         const Board& board,

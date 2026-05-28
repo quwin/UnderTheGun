@@ -29,7 +29,6 @@ struct BettingState {
     //     p1_committed_this_round = 1500
     //     current_bet_to_call = 1500
     int current_bet_to_call = 0;
-
     // Size of the latest bet/raise increment.
     //
     // Example:
@@ -39,7 +38,6 @@ struct BettingState {
     //   P1 raises from 500 to 1500:
     //     last_raise_size = 1000
     int last_raise_size = 0;
-
     // Number of raises after the initial bet on this street.
     //
     // Suggested convention:
@@ -47,18 +45,14 @@ struct BettingState {
     //   bet-raise => num_raises_this_street = 1
     //   bet-raise-reraise => num_raises_this_street = 2
     int num_raises_this_street = 0;
-
     // True once any bet or raise has occurred this street.
     bool round_has_bet = false;
-
     // Used to detect check-check closure.
     bool last_action_was_check = false;
-
     // Last player to bet or raise.
     //
     // Chance means there has been no aggressor yet.
     Player last_aggressor = Player::Chance;
-
     int committed(Player player) const {
         switch (player) {
             case Player::P0:
@@ -73,7 +67,6 @@ struct BettingState {
                 );
         }
     }
-
     void set_committed(Player player, int amount) {
         if (amount <= 0) {
             throw std::invalid_argument("Committed amount must be greater than zero.");

@@ -1,11 +1,12 @@
 #pragma once
 
 #include "game.hpp"
-#include "poker/card.hpp"
 #include "holdem/action.hpp"
 
 #include <string>
 #include <vector>
+
+#include "phevaluator/phevaluator.h"
 
 namespace poker {
 
@@ -18,10 +19,10 @@ enum class KuhnAction : int {
 
 struct KuhnConfig {
     // Standard Kuhn uses J, Q, K.
-    std::vector<CardId> deck = {
-        make_card(Rank::Jack, Suit::Spades),
-        make_card(Rank::Queen, Suit::Spades),
-        make_card(Rank::King, Suit::Spades)
+    std::vector<phevaluator::Card> deck = {
+        phevaluator::Card("Js"),
+        phevaluator::Card("Qs"),
+        phevaluator::Card("Ks")
     };
 
     // Standard Kuhn has ante = 1 and one bet size = 1.
@@ -52,8 +53,8 @@ private:
         BuildContext& ctx,
         int parent_id,
         Player player_to_act,
-        CardId p0_card,
-        CardId p1_card,
+        phevaluator::Card p0_card,
+        phevaluator::Card p1_card,
         const std::string& history
     ) const;
 
@@ -62,8 +63,8 @@ private:
         BuildContext& ctx,
         int parent_id,
         holdem::ActionType incoming_action,
-        CardId p0_card,
-        CardId p1_card,
+        phevaluator::Card p0_card,
+        phevaluator::Card p1_card,
         const std::string& terminal_history
     ) const;
 
@@ -73,8 +74,8 @@ private:
         int parent_id,
         holdem::ActionType incoming_action,
         Player player_to_act,
-        CardId p0_card,
-        CardId p1_card,
+        phevaluator::Card p0_card,
+        phevaluator::Card p1_card,
         const std::string& history
     ) const;
 
@@ -84,8 +85,8 @@ private:
     bool is_terminal_history(const std::string& history) const;
 
     float terminal_utility_p0(
-        CardId p0_card,
-        CardId p1_card,
+        phevaluator::Card p0_card,
+        phevaluator::Card p1_card,
         const std::string& terminal_history
     ) const;
 
@@ -94,7 +95,7 @@ private:
         const std::string& new_history
     ) const;
 
-    CardId private_card_for(Player player, CardId p0_card, CardId p1_card) const;
+    phevaluator::Card private_card_for(Player player, phevaluator::Card p0_card, phevaluator::Card p1_card) const;
 
     std::string append_action(
         const std::string& history,

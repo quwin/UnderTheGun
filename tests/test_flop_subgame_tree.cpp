@@ -7,7 +7,6 @@
 #include "holdem/action.hpp"
 
 #include "poker/board.hpp"
-#include "poker/card.hpp"
 #include "poker/range.hpp"
 
 #include <algorithm>
@@ -43,37 +42,25 @@ void check_eq(
     }
 }
 
-poker::CardId c(poker::Rank rank, poker::Suit suit) {
-    return poker::make_card(rank, suit);
-}
 
 poker::Board make_test_flop_board() {
     return poker::Board{
         {
-            c(poker::Rank::Ace, poker::Suit::Spades),
-            c(poker::Rank::Seven, poker::Suit::Hearts),
-            c(poker::Rank::Two, poker::Suit::Clubs)
+            phevaluator::Card("As"),
+            phevaluator::Card("7h"),
+            phevaluator::Card("Jh")
         }
     };
 }
 
 poker::Range make_tiny_p0_range() {
     poker::Range range;
-
     range.clear();
 
     range.set_weight(
         poker::make_hand(
-            c(poker::Rank::Ace, poker::Suit::Hearts),
-            c(poker::Rank::King, poker::Suit::Hearts)
-        ),
-        1.0f
-    );
-
-    range.set_weight(
-        poker::make_hand(
-            c(poker::Rank::King, poker::Suit::Spades),
-            c(poker::Rank::King, poker::Suit::Diamonds)
+        phevaluator::Card("Kh"),
+        phevaluator::Card("Qh")
         ),
         1.0f
     );
@@ -83,25 +70,15 @@ poker::Range make_tiny_p0_range() {
 
 poker::Range make_tiny_p1_range() {
     poker::Range range;
-
     range.clear();
 
     range.set_weight(
         poker::make_hand(
-            c(poker::Rank::Queen, poker::Suit::Hearts),
-            c(poker::Rank::Queen, poker::Suit::Diamonds)
+        phevaluator::Card("Qc"),
+        phevaluator::Card("Qd")
         ),
         1.0f
     );
-
-    range.set_weight(
-        poker::make_hand(
-            c(poker::Rank::Jack, poker::Suit::Spades),
-            c(poker::Rank::Ten, poker::Suit::Spades)
-        ),
-        1.0f
-    );
-
     return range;
 }
 

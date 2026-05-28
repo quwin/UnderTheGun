@@ -1,14 +1,12 @@
 #pragma once
 
-#include "poker/card.hpp"
-
 #include <array>
 #include <cstdint>
 #include <stdexcept>
 #include <vector>
+#include "../../external/PokerHandEvaluator/cpp/include/phevaluator/card.h"
 
 namespace poker {
-
 using DeckMask = std::uint64_t;
 
 inline DeckMask empty_deck_mask() {
@@ -16,24 +14,36 @@ inline DeckMask empty_deck_mask() {
 }
 
 inline DeckMask full_deck_mask() {
-    // Lower 52 bits set to 1.
     return (1ULL << 52) - 1ULL;
 }
 
-inline DeckMask card_mask(CardId card) {
-    validate_card(card);
-    return 1ULL << static_cast<std::uint64_t>(card);
+inline int card_index(const phevaluator::Card& card) {
+    const int id = static_cast<int>(card);
+
+    if (id < 0 || id >= 52) {
+        throw std::invalid_argument("phevaluator::Card id must be in range 0..51.");
+    }
+
+    return id;
 }
 
-inline bool contains_card(DeckMask mask, CardId card) {
+inline void validate_card(const phevaluator::Card& card) {
+    (void)card_index(card);
+}
+
+inline DeckMask card_mask(const phevaluator::Card& card) {
+    return 1ULL << static_cast<std::uint64_t>(card_index(card));
+}
+
+inline bool contains_card(DeckMask mask, const phevaluator::Card& card) {
     return (mask & card_mask(card)) != 0ULL;
 }
 
-inline DeckMask add_card(DeckMask mask, CardId card) {
+inline DeckMask add_card(DeckMask mask, const phevaluator::Card& card) {
     return mask | card_mask(card);
 }
 
-inline DeckMask remove_card(DeckMask mask, CardId card) {
+inline DeckMask remove_card(DeckMask mask, const phevaluator::Card& card) {
     return mask & ~card_mask(card);
 }
 
@@ -80,27 +90,27 @@ inline void validate_deck_mask(DeckMask mask) {
     }
 }
 
-inline std::vector<CardId> cards_from_mask(DeckMask mask) {
+inline std::vector<phevaluator::Card> cards_from_mask(DeckMask mask) {
     validate_deck_mask(mask);
 
-    std::vector<CardId> cards;
+    std::vector<phevaluator::Card> cards;
     cards.reserve(static_cast<std::size_t>(popcount(mask)));
 
-    for (int card = 0; card < 52; ++card) {
-        const CardId card_id = static_cast<CardId>(card);
+    for (int id = 0; id < 52; ++id) {
+        const phevaluator::Card card{id};
 
-        if (contains_card(mask, card_id)) {
-            cards.push_back(card_id);
+        if (contains_card(mask, card)) {
+            cards.push_back(card);
         }
     }
 
     return cards;
 }
 
-inline DeckMask mask_from_cards(const std::vector<CardId>& cards) {
+inline DeckMask mask_from_cards(const std::vector<phevaluator::Card>& cards) {
     DeckMask mask = empty_deck_mask();
 
-    for (CardId card : cards) {
+    for (const phevaluator::Card& card : cards) {
         if (contains_card(mask, card)) {
             throw std::invalid_argument("Duplicate card in card collection.");
         }
@@ -112,10 +122,10 @@ inline DeckMask mask_from_cards(const std::vector<CardId>& cards) {
 }
 
 template <std::size_t N>
-inline DeckMask mask_from_array(const std::array<CardId, N>& cards) {
+inline DeckMask mask_from_array(const std::array<phevaluator::Card, N>& cards) {
     DeckMask mask = empty_deck_mask();
 
-    for (CardId card : cards) {
+    for (const phevaluator::Card& card : cards) {
         if (contains_card(mask, card)) {
             throw std::invalid_argument("Duplicate card in card array.");
         }
@@ -131,7 +141,7 @@ inline DeckMask remaining_cards(DeckMask dead_cards) {
     return full_deck_mask() & ~dead_cards;
 }
 
-inline std::vector<CardId> remaining_card_list(DeckMask dead_cards) {
+inline std::vector<phevaluator::Card> remaining_card_list(DeckMask dead_cards) {
     return cards_from_mask(remaining_cards(dead_cards));
 }
 

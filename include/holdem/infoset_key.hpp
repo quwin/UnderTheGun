@@ -21,23 +21,17 @@ namespace poker::holdem {
 struct InfoSetKey {
     Player player = Player::Terminal;
     Street street = Street::River;
-
     Board board;
     BoardBucketId board_bucket = kInvalidBoardBucket;
-
     HandBucketId private_hand_bucket = kInvalidHandBucket;
-
     std::vector<Action> public_action_history;
-
     int pot = 0;
     int p0_stack = 0;
     int p1_stack = 0;
-
     int p0_committed_this_round = 0;
     int p1_committed_this_round = 0;
     int current_bet_to_call = 0;
     int num_raises_this_street = 0;
-
     bool operator==(const InfoSetKey& other) const {
         return player == other.player &&
                street == other.street &&
@@ -63,15 +57,12 @@ inline std::string action_history_key(
     const std::vector<Action>& actions
 ) {
     std::string result;
-
     for (std::size_t i = 0; i < actions.size(); ++i) {
         if (i > 0) {
             result += ",";
         }
-
         result += action_history_token(actions[i]);
     }
-
     return result;
 }
 

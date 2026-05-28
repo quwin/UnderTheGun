@@ -6,11 +6,8 @@
 #include "holdem/terminal_utility.hpp"
 
 #include "poker/board.hpp"
-#include "poker/card.hpp"
 #include "poker/hand.hpp"
-#include "poker/hand_evaluator.hpp"
 
-#include <cmath>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
@@ -44,27 +41,6 @@ void check_near(
     }
 }
 
-poker::CardId c(poker::Rank rank, poker::Suit suit) {
-    return poker::make_card(rank, suit);
-}
-
-poker::HoleCards hand(
-    poker::CardId a,
-    poker::CardId b
-) {
-    return poker::HoleCards{a, b};
-}
-
-poker::Board board(
-    poker::CardId a,
-    poker::CardId b,
-    poker::CardId c0,
-    poker::CardId d,
-    poker::CardId e
-) {
-    return poker::Board{{a, b, c0, d, e}};
-}
-
 poker::holdem::PrivateState private_state(
     poker::HoleCards p0_hand,
     poker::HoleCards p1_hand
@@ -80,13 +56,13 @@ poker::holdem::PublicState make_base_river_state() {
 
     state.street = poker::holdem::Street::River;
 
-    state.board = board(
-        c(poker::Rank::Ace, poker::Suit::Spades),
-        c(poker::Rank::Seven, poker::Suit::Hearts),
-        c(poker::Rank::Two, poker::Suit::Clubs),
-        c(poker::Rank::Jack, poker::Suit::Diamonds),
-        c(poker::Rank::Four, poker::Suit::Spades)
-    );
+    state.board = poker::Board{
+        {
+            phevaluator::Card("As"),
+            phevaluator::Card("7h"),
+            phevaluator::Card("Jh")
+        }
+    };
 
     state.pot = 1000;
     state.p0_stack = 2000;
@@ -109,12 +85,9 @@ float utility_p0(
     const poker::holdem::PublicState& public_state,
     const poker::holdem::PrivateState& private_state
 ) {
-    const poker::HandEvaluator evaluator;
-
     return poker::holdem::terminal_utility_p0(
         public_state,
-        private_state,
-        evaluator
+        private_state
     );
 }
 
@@ -141,14 +114,8 @@ void test_p1_folds_to_p0_bet_p0_wins_current_pot_minus_own_commitment() {
     state.winner = poker::Player::P0;
 
     const poker::holdem::PrivateState priv = private_state(
-        hand(
-            c(poker::Rank::King, poker::Suit::Hearts),
-            c(poker::Rank::Queen, poker::Suit::Hearts)
-        ),
-        hand(
-            c(poker::Rank::Ten, poker::Suit::Clubs),
-            c(poker::Rank::Nine, poker::Suit::Clubs)
-        )
+        poker::HoleCards(phevaluator::Card("Qh"), phevaluator::Card("Kh")),
+        poker::HoleCards(phevaluator::Card("9c"), phevaluator::Card("Tc"))
     );
 
     check_near(
@@ -186,14 +153,8 @@ void test_p0_folds_to_p1_bet_p0_loses_own_commitment() {
     state.winner = poker::Player::P1;
 
     const poker::holdem::PrivateState priv = private_state(
-        hand(
-            c(poker::Rank::King, poker::Suit::Hearts),
-            c(poker::Rank::Queen, poker::Suit::Hearts)
-        ),
-        hand(
-            c(poker::Rank::Ten, poker::Suit::Clubs),
-            c(poker::Rank::Nine, poker::Suit::Clubs)
-        )
+        poker::HoleCards(phevaluator::Card("Qh"), phevaluator::Card("Kh")),
+        poker::HoleCards(phevaluator::Card("9c"), phevaluator::Card("Tc"))
     );
 
     check_near(
@@ -230,14 +191,8 @@ void test_p0_folds_after_calling_or_raising_loses_own_commitment() {
     state.winner = poker::Player::P1;
 
     const poker::holdem::PrivateState priv = private_state(
-        hand(
-            c(poker::Rank::King, poker::Suit::Hearts),
-            c(poker::Rank::Queen, poker::Suit::Hearts)
-        ),
-        hand(
-            c(poker::Rank::Ten, poker::Suit::Clubs),
-            c(poker::Rank::Nine, poker::Suit::Clubs)
-        )
+        poker::HoleCards(phevaluator::Card("Qh"), phevaluator::Card("Kh")),
+        poker::HoleCards(phevaluator::Card("9c"), phevaluator::Card("Tc"))
     );
 
     check_near(
@@ -273,14 +228,8 @@ void test_p0_wins_showdown_gets_pot_minus_own_commitment() {
     state.winner = poker::Player::Terminal;
 
     const poker::holdem::PrivateState priv = private_state(
-        hand(
-            c(poker::Rank::Ace, poker::Suit::Hearts),
-            c(poker::Rank::King, poker::Suit::Hearts)
-        ),
-        hand(
-            c(poker::Rank::Ten, poker::Suit::Clubs),
-            c(poker::Rank::Nine, poker::Suit::Clubs)
-        )
+        poker::HoleCards(phevaluator::Card("Qh"), phevaluator::Card("Kh")),
+        poker::HoleCards(phevaluator::Card("9c"), phevaluator::Card("Tc"))
     );
 
     check_near(
@@ -315,14 +264,8 @@ void test_p0_loses_showdown_loses_own_commitment() {
     state.winner = poker::Player::Terminal;
 
     const poker::holdem::PrivateState priv = private_state(
-        hand(
-            c(poker::Rank::King, poker::Suit::Hearts),
-            c(poker::Rank::Queen, poker::Suit::Hearts)
-        ),
-        hand(
-            c(poker::Rank::Ace, poker::Suit::Hearts),
-            c(poker::Rank::Ten, poker::Suit::Clubs)
-        )
+        poker::HoleCards(phevaluator::Card("Qh"), phevaluator::Card("Kh")),
+        poker::HoleCards(phevaluator::Card("9c"), phevaluator::Card("Tc"))
     );
 
     check_near(
@@ -340,13 +283,15 @@ void test_showdown_tie_splits_pot() {
 
     // Board makes broadway straight for both:
     // Ts Jd Qc Kh As.
-    state.board = board(
-        c(poker::Rank::Ten, poker::Suit::Spades),
-        c(poker::Rank::Jack, poker::Suit::Diamonds),
-        c(poker::Rank::Queen, poker::Suit::Clubs),
-        c(poker::Rank::King, poker::Suit::Hearts),
-        c(poker::Rank::Ace, poker::Suit::Spades)
-    );
+    state.board = poker::Board{
+        {
+            phevaluator::Card("As"),
+            phevaluator::Card("7h"),
+            phevaluator::Card("Jh"),
+            phevaluator::Card("Ts"),
+            phevaluator::Card("9d"),
+        }
+    };
 
     // Terminal pot 2000, both committed 500.
     // Split = 1000 returned to P0.
@@ -365,14 +310,8 @@ void test_showdown_tie_splits_pot() {
     state.winner = poker::Player::Terminal;
 
     const poker::holdem::PrivateState priv = private_state(
-        hand(
-            c(poker::Rank::Two, poker::Suit::Hearts),
-            c(poker::Rank::Three, poker::Suit::Hearts)
-        ),
-        hand(
-            c(poker::Rank::Four, poker::Suit::Clubs),
-            c(poker::Rank::Five, poker::Suit::Clubs)
-        )
+        poker::HoleCards(phevaluator::Card("2h"), phevaluator::Card("3h")),
+        poker::HoleCards(phevaluator::Card("4c"), phevaluator::Card("5c"))
     );
 
     check_near(
@@ -405,14 +344,8 @@ void test_all_in_showdown_win_uses_full_terminal_pot() {
     state.winner = poker::Player::Terminal;
 
     const poker::holdem::PrivateState priv = private_state(
-        hand(
-            c(poker::Rank::Ace, poker::Suit::Hearts),
-            c(poker::Rank::King, poker::Suit::Hearts)
-        ),
-        hand(
-            c(poker::Rank::Ten, poker::Suit::Clubs),
-            c(poker::Rank::Nine, poker::Suit::Clubs)
-        )
+       poker::HoleCards(phevaluator::Card("Ah"), phevaluator::Card("Kh")),
+       poker::HoleCards(phevaluator::Card("Tc"), phevaluator::Card("9c"))
     );
 
     check_near(
@@ -432,14 +365,8 @@ void test_terminal_utility_rejects_nonterminal_state() {
     state.terminal_reason = poker::holdem::TerminalReason::None;
 
     const poker::holdem::PrivateState priv = private_state(
-        hand(
-            c(poker::Rank::Ace, poker::Suit::Hearts),
-            c(poker::Rank::King, poker::Suit::Hearts)
-        ),
-        hand(
-            c(poker::Rank::Ten, poker::Suit::Clubs),
-            c(poker::Rank::Nine, poker::Suit::Clubs)
-        )
+       poker::HoleCards(phevaluator::Card("Ah"), phevaluator::Card("Kh")),
+       poker::HoleCards(phevaluator::Card("Tc"), phevaluator::Card("9c"))
     );
 
     bool threw = false;
@@ -467,14 +394,8 @@ void test_fold_terminal_requires_folded_player() {
     state.winner = poker::Player::Terminal;
 
     const poker::holdem::PrivateState priv = private_state(
-        hand(
-            c(poker::Rank::Ace, poker::Suit::Hearts),
-            c(poker::Rank::King, poker::Suit::Hearts)
-        ),
-        hand(
-            c(poker::Rank::Ten, poker::Suit::Clubs),
-            c(poker::Rank::Nine, poker::Suit::Clubs)
-        )
+       poker::HoleCards(phevaluator::Card("Ah"), phevaluator::Card("Kh")),
+       poker::HoleCards(phevaluator::Card("Tc"), phevaluator::Card("9c"))
     );
 
     bool threw = false;
@@ -498,10 +419,10 @@ void test_showdown_terminal_requires_river_board() {
 
     state.board = poker::Board{
         {
-            c(poker::Rank::Ace, poker::Suit::Spades),
-            c(poker::Rank::Seven, poker::Suit::Hearts),
-            c(poker::Rank::Two, poker::Suit::Clubs),
-            c(poker::Rank::Jack, poker::Suit::Diamonds)
+            phevaluator::Card("As"),
+            phevaluator::Card("7h"),
+            phevaluator::Card("Jh"),
+            phevaluator::Card("Ts")
         }
     };
 
@@ -509,14 +430,8 @@ void test_showdown_terminal_requires_river_board() {
     state.terminal_reason = poker::holdem::TerminalReason::Showdown;
 
     const poker::holdem::PrivateState priv = private_state(
-        hand(
-            c(poker::Rank::Ace, poker::Suit::Hearts),
-            c(poker::Rank::King, poker::Suit::Hearts)
-        ),
-        hand(
-            c(poker::Rank::Ten, poker::Suit::Clubs),
-            c(poker::Rank::Nine, poker::Suit::Clubs)
-        )
+       poker::HoleCards(phevaluator::Card("Ah"), phevaluator::Card("Kh")),
+       poker::HoleCards(phevaluator::Card("Tc"), phevaluator::Card("9c"))
     );
 
     bool threw = false;

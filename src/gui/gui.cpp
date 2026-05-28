@@ -45,7 +45,6 @@
 #include "holdem/subgame_config.hpp"
 #include "holdem/street.hpp"
 #include "poker/board.hpp"
-#include "poker/card.hpp"
 #include "poker/hand.hpp"
 #include "poker/range.hpp"
 #include "cfr_gpu.hpp"
@@ -67,51 +66,11 @@ static const std::vector<char> SUITS = {'h', 'd', 'c', 's'};
 
 namespace {
 
-poker::Rank parse_rank(char c) {
-  switch (c) {
-    case 'A': case 'a': return poker::Rank::Ace;
-    case 'K': case 'k': return poker::Rank::King;
-    case 'Q': case 'q': return poker::Rank::Queen;
-    case 'J': case 'j': return poker::Rank::Jack;
-    case 'T': case 't': return poker::Rank::Ten;
-    case '9': return poker::Rank::Nine;
-    case '8': return poker::Rank::Eight;
-    case '7': return poker::Rank::Seven;
-    case '6': return poker::Rank::Six;
-    case '5': return poker::Rank::Five;
-    case '4': return poker::Rank::Four;
-    case '3': return poker::Rank::Three;
-    case '2': return poker::Rank::Two;
-    default: throw std::invalid_argument("Invalid rank in card/hand string.");
-  }
-}
-
-poker::Suit parse_suit(char c) {
-  switch (c) {
-    case 'c': case 'C': return poker::Suit::Clubs;
-    case 'd': case 'D': return poker::Suit::Diamonds;
-    case 'h': case 'H': return poker::Suit::Hearts;
-    case 's': case 'S': return poker::Suit::Spades;
-    default: throw std::invalid_argument("Invalid suit in card string.");
-  }
-}
-
-poker::CardId parse_card_label(const std::string& label) {
-  if (label.size() != 2) {
-    throw std::invalid_argument("Card labels must be two characters, for example Ah.");
-  }
-  return poker::make_card(parse_rank(label[0]), parse_suit(label[1]));
-}
-
-std::string card_label(poker::CardId card) {
-  return poker::to_string(card);
-}
-
 poker::Board make_board_from_labels(const std::vector<std::string>& labels) {
-  std::vector<poker::CardId> cards;
+  std::vector<phevaluator::Card> cards;
   cards.reserve(labels.size());
   for (const std::string& label : labels) {
-    cards.push_back(parse_card_label(label));
+    cards.emplace_back(label);
   }
   return poker::Board{cards};
 }
@@ -125,16 +84,16 @@ poker::holdem::Street street_from_board_size(std::size_t board_size) {
   }
 }
 
-std::vector<poker::CardId> cards_of_suitless_rank(char rank_char) {
-  const poker::Rank rank = parse_rank(rank_char);
+std::vector<phevaluator::Card> cards_of_suitless_rank(const char rank_char) {
   return {
-      poker::make_card(rank, poker::Suit::Clubs),
-      poker::make_card(rank, poker::Suit::Diamonds),
-      poker::make_card(rank, poker::Suit::Hearts),
-      poker::make_card(rank, poker::Suit::Spades)};
+    phevaluator::Card(std::string(1, rank_char).append("c")),
+    phevaluator::Card(std::string(1, rank_char).append("d")),
+    phevaluator::Card(std::string(1, rank_char).append("h")),
+    phevaluator::Card(std::string(1, rank_char).append("s")),
+  };
 }
 
-void add_combo_if_legal(poker::Range& range, poker::CardId a, poker::CardId b, poker::DeckMask dead) {
+void add_combo_if_legal(poker::Range& range, phevaluator::Card a, phevaluator::Card b, poker::DeckMask dead) {
   if (a == b) return;
   const poker::HoleCards hand{a, b};
   if (poker::masks_overlap(hand.mask(), dead)) return;
@@ -155,7 +114,7 @@ poker::Range make_range_from_hand_labels(
 
     // Exact combo: AhKh, AsAd, etc.
     if (h.size() == 4) {
-      add_combo_if_legal(range, parse_card_label(h.substr(0, 2)), parse_card_label(h.substr(2, 2)), dead);
+      add_combo_if_legal(range, phevaluator::Card(h.substr(0, 2)), phevaluator::Card(h.substr(2, 2)), dead);
       continue;
     }
 
@@ -168,13 +127,13 @@ poker::Range make_range_from_hand_labels(
     const char r2 = h[1];
     const bool pair = (std::toupper(r1) == std::toupper(r2));
     const char suffix = (h.size() == 3 ? static_cast<char>(std::tolower(h[2])) : '\0');
-    const std::vector<poker::CardId> c1 = cards_of_suitless_rank(r1);
-    const std::vector<poker::CardId> c2 = cards_of_suitless_rank(r2);
+    const std::vector<phevaluator::Card> c1 = cards_of_suitless_rank(r1);
+    const std::vector<phevaluator::Card> c2 = cards_of_suitless_rank(r2);
 
-    for (poker::CardId a : c1) {
-      for (poker::CardId b : c2) {
+    for (phevaluator::Card a : c1) {
+      for (phevaluator::Card b : c2) {
         if (a == b) continue;
-        const bool suited = poker::suit_of(a) == poker::suit_of(b);
+        const bool suited = a.describeSuit() == b.describeSuit();
         if (pair && static_cast<int>(a) >= static_cast<int>(b)) continue;
         if (!pair && suffix == 's' && !suited) continue;
         if (!pair && suffix == 'o' && suited) continue;
@@ -191,10 +150,10 @@ poker::Range make_range_from_hand_labels(
 }
 
 std::string hand_type_from_hole_cards(const poker::HoleCards& hand) {
-  const char r1 = poker::to_string(poker::rank_of(hand.a))[0];
-  const char r2 = poker::to_string(poker::rank_of(hand.b))[0];
-  const int v1 = static_cast<int>(poker::rank_of(hand.a));
-  const int v2 = static_cast<int>(poker::rank_of(hand.b));
+  const char r1 = hand.a.describeSuit();
+  const char r2 = hand.b.describeSuit();
+  const int v1 = hand.a.describeRank();
+  const int v2 = hand.b.describeRank();
 
   char hi = r1;
   char lo = r2;
@@ -207,7 +166,7 @@ std::string hand_type_from_hole_cards(const poker::HoleCards& hand) {
     return std::string{hi, lo};
   }
 
-  const bool suited = poker::suit_of(hand.a) == poker::suit_of(hand.b);
+  const bool suited = r1 == r2;
   return std::string{hi} + std::string{lo} + (suited ? "s" : "o");
 }
 

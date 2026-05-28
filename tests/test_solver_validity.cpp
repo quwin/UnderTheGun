@@ -11,7 +11,6 @@
 #include "holdem/street.hpp"
 
 #include "poker/board.hpp"
-#include "poker/card.hpp"
 #include "poker/range.hpp"
 
 #include <cmath>
@@ -107,18 +106,14 @@ void check_near(
     }
 }
 
-poker::CardId c(poker::Rank rank, poker::Suit suit) {
-    return poker::make_card(rank, suit);
-}
-
 poker::Board make_river_board() {
     return poker::Board{
         {
-            c(poker::Rank::Ace,   poker::Suit::Spades),
-            c(poker::Rank::Seven, poker::Suit::Hearts),
-            c(poker::Rank::Two,   poker::Suit::Clubs),
-            c(poker::Rank::Jack,  poker::Suit::Diamonds),
-            c(poker::Rank::Four,  poker::Suit::Spades)
+            phevaluator::Card("As"),
+            phevaluator::Card("7h"),
+            phevaluator::Card("Jh"),
+            phevaluator::Card("Ts"),
+            phevaluator::Card("3d"),
         }
     };
 }
@@ -129,19 +124,13 @@ poker::Range make_p0_tiny_range() {
 
     // K-high hand.
     range.set_weight(
-        poker::make_hand(
-            c(poker::Rank::King,  poker::Suit::Hearts),
-            c(poker::Rank::Queen, poker::Suit::Hearts)
-        ),
+        poker::make_hand(phevaluator::Card("Ah"), phevaluator::Card("Kh")),
         1.0f
     );
 
     // Pair of kings.
     range.set_weight(
-        poker::make_hand(
-            c(poker::Rank::King, poker::Suit::Spades),
-            c(poker::Rank::King, poker::Suit::Diamonds)
-        ),
+        poker::make_hand(phevaluator::Card("Ks"), phevaluator::Card("Kd")),
         1.0f
     );
 
@@ -154,19 +143,13 @@ poker::Range make_p1_tiny_range() {
 
     // Pair of queens.
     range.set_weight(
-        poker::make_hand(
-            c(poker::Rank::Queen, poker::Suit::Clubs),
-            c(poker::Rank::Queen, poker::Suit::Diamonds)
-        ),
+        poker::make_hand(phevaluator::Card("Qc"), phevaluator::Card("Qd")),
         1.0f
     );
 
     // T-high hand.
     range.set_weight(
-        poker::make_hand(
-            c(poker::Rank::Ten,  poker::Suit::Hearts),
-            c(poker::Rank::Nine, poker::Suit::Hearts)
-        ),
+        poker::make_hand(phevaluator::Card("Th"), phevaluator::Card("9h")),
         1.0f
     );
 

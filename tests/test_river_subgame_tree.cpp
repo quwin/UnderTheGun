@@ -60,7 +60,6 @@ void check_near(
         throw std::runtime_error(oss.str());
     }
 }
-
 poker::Board make_test_river_board() {
     return poker::Board{
         {

@@ -14,17 +14,14 @@ namespace poker::holdem {
 class BettingEngine {
 public:
     BettingEngine() = default;
-
     // Returns all legal abstract actions from the current public state.
     //
     // Examples:
-    //
     // Unopened pot:
     //   check
     //   bet 50% pot
     //   bet 100% pot
     //   all-in
-    //
     // Facing bet:
     //   fold
     //   call
@@ -34,7 +31,6 @@ public:
         const PublicState& state,
         const BettingAbstraction& abstraction
     ) const;
-
     // Applies one legal action and returns the next public state.
     //
     // This updates:
@@ -52,7 +48,6 @@ public:
         const PublicState& state,
         const Action& action
     ) const;
-
     // True when the current betting round has closed.
     //
     // Examples:
@@ -63,7 +58,6 @@ public:
     bool betting_round_closed(
         const PublicState& state
     ) const;
-
     // True if state is terminal because somebody folded.
     bool is_fold_terminal(
         const PublicState& state

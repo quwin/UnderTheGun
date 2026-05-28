@@ -149,7 +149,7 @@ Page1_Settings::Page1_Settings(int X, int Y, int W, int H)
 
   m_choCFRRenderer = new Fl_Choice(0, 0, 0, 0);
   m_choCFRRenderer->textsize(24);
-  m_choCFRRenderer->add("CPU|GPU");
+  m_choCFRRenderer->add("GPU|CPU");
   m_choCFRRenderer->value(0);
   m_grid->widget(m_choCFRRenderer, 10, 2);
 

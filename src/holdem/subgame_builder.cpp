@@ -6,9 +6,10 @@
 #include <utility>
 #include <vector>
 
+#include "holdem/terminal_utility.hpp"
+
 namespace poker::holdem {
 namespace {
-
     GameAction to_game_action(const Action& action) {
         return GameAction{
             static_cast<int>(action.type),
@@ -75,16 +76,16 @@ namespace {
         int parent_id,
         poker::Node node
     ) {
-                node.parent = parent_id;
+        node.parent = parent_id;
 
-                const int node_id = ctx.add_node(node);
+        const int node_id = ctx.add_node(node);
 
-                if (parent_id >= 0) {
-                    ctx.add_child(parent_id, node_id);
-                }
+        if (parent_id >= 0) {
+            ctx.add_child(parent_id, node_id);
+        }
 
-                return node_id;
-    }
+        return node_id;
+}
 
 } // namespace
 
@@ -106,16 +107,21 @@ namespace {
     )
         : config_(std::move(config)),
           betting_engine_{},
-          chance_model_(config_.board_abstraction),
-          hand_evaluator_{} {}
+          chance_model_(config_.board_abstraction) {}
+
 
     Game HoldemSubgameBuilder::build() const {
         validate_config();
-
+        if (config_.collapse_all_in_runouts_to_ev) {
+            all_in_equity_cache_.initialize_for_subgame(
+                config_.board,
+                config_.start_street,
+                config_.p0_range,
+                config_.p1_range
+            );
+        }
         HoldemBuildContext ctx;
-
         const PublicState initial_public = config_.initial_public_state();
-
         const int root_id = add_root_chance_node(ctx);
 
         add_private_deal_children(
@@ -130,10 +136,9 @@ namespace {
 
         return std::move(ctx.game);
     }
-
     int HoldemSubgameBuilder::add_root_chance_node(
         BuildContext& ctx
-    ) const {
+    ) {
         Node root;
 
         root.parent = -1;
@@ -285,12 +290,18 @@ namespace {
         for (const Action& action : legal_actions) {
             PublicState next_public = betting_engine_.apply_action(public_state, action);
 
-            if (next_public.terminal &&
-                next_public.terminal_reason == TerminalReason::AllInCalled) {
+            if (next_public.terminal && next_public.terminal_reason == TerminalReason::AllInCalled) {
                 if (config_.collapse_all_in_runouts_to_ev) {
-                    throw std::runtime_error(
-                        "collapse_all_in_runouts_to_ev requires an AllInEquityResolver."
+                    const float p0_equity = all_in_equity_cache_.p0_equity(next_public.board, next_public.street,private_state);
+                    const float utility_p0 = p0_equity * static_cast<float>(next_public.pot) - static_cast<float>(next_public.betting.p0_committed_this_round);
+                    add_terminal_node_with_utility(
+                        ctx,
+                        node_id,
+                        action,
+                        next_public,
+                        utility_p0
                     );
+                    continue;
                 }
 
                 Node all_in_chance;
@@ -302,8 +313,7 @@ namespace {
                 all_in_chance.terminal = false;
                 all_in_chance.utility_p0 = 0.0f;
 
-                const int all_in_chance_id =
-                    add_node_and_link(ctx, node_id, all_in_chance);
+                const int all_in_chance_id = add_node_and_link(ctx, node_id, all_in_chance);
 
                 expand_all_in_called_state(
                     ctx,
@@ -481,8 +491,7 @@ namespace {
             return;
         }
 
-        PublicState runout_state =
-            clear_terminal_all_in_marker(public_state);
+        PublicState runout_state = clear_terminal_all_in_marker(public_state);
 
         const Player arbitrary_next_to_act = Player::P0;
 
@@ -525,14 +534,12 @@ namespace {
 
             child_chance.player = Player::Chance;
             child_chance.infoset = -1;
-            child_chance.incoming_action =
-                public_board_game_action(outcome.public_state.board);
+            child_chance.incoming_action = public_board_game_action(outcome.public_state.board);
             child_chance.chance_prob = outcome.probability;
             child_chance.terminal = false;
             child_chance.utility_p0 = 0.0f;
 
-            const int child_chance_id =
-                add_node_and_link(ctx, node_id, child_chance);
+            const int child_chance_id = add_node_and_link(ctx, node_id, child_chance);
 
             expand_all_in_called_state(
                 ctx,
@@ -613,8 +620,7 @@ namespace {
         const float utility =
             terminal_utility_p0(
                 public_state,
-                private_state,
-                hand_evaluator_
+                private_state
             );
 
         return add_terminal_node_with_utility(
@@ -637,8 +643,7 @@ namespace {
         const float utility =
             terminal_utility_p0(
                 public_state,
-                private_state,
-                hand_evaluator_
+                private_state
             );
 
         if (!public_state.terminal) {

@@ -10,17 +10,17 @@ namespace poker {
 
 namespace {
 
-bool p0_wins_showdown(CardId p0_card, CardId p1_card) {
-    return static_cast<int>(rank_of(p0_card)) > static_cast<int>(rank_of(p1_card));
+bool p0_wins_showdown(phevaluator::Card p0_card, phevaluator::Card p1_card) {
+    return static_cast<int>(p0_card) > static_cast<int>(p1_card);
 }
 
 std::string kuhn_infoset_key(
     Player player,
-    CardId private_card,
+    phevaluator::Card private_card,
     const std::string& public_history
 ) {
     return to_string(player) + "|" +
-           poker::to_string(private_card) + "|" +
+           private_card.describeRank() + "|" +
            public_history;
 }
 
@@ -79,12 +79,11 @@ std::vector<GameAction> make_kuhn_game_actions(
     return result;
 }
 
-GameAction make_private_deal_action(CardId p0_card, CardId p1_card) {
+GameAction make_private_deal_action(phevaluator::Card p0_card, phevaluator::Card p1_card) {
     return GameAction{
         0,
         0,
-        "deal:p0=" + poker::to_string(p0_card) +
-            ",p1=" + poker::to_string(p1_card)
+        "deal:p0=" + std::to_string(p0_card.describeRank()) + ",p1=" + p1_card.describeRank()
     };
 }
 
@@ -127,8 +126,8 @@ void KuhnGameBuilder::add_chance_deals(
 ) const {
     int num_deals = 0;
 
-    for (CardId p0_card : config_.deck) {
-        for (CardId p1_card : config_.deck) {
+    for (phevaluator::Card p0_card : config_.deck) {
+        for (phevaluator::Card p1_card : config_.deck) {
             if (!config_.allow_redeal_same_card && p0_card == p1_card) {
                 continue;
             }
@@ -146,8 +145,8 @@ void KuhnGameBuilder::add_chance_deals(
     const float deal_probability =
         1.0f / static_cast<float>(num_deals);
 
-    for (CardId p0_card : config_.deck) {
-        for (CardId p1_card : config_.deck) {
+    for (phevaluator::Card p0_card : config_.deck) {
+        for (phevaluator::Card p1_card : config_.deck) {
             if (!config_.allow_redeal_same_card && p0_card == p1_card) {
                 continue;
             }
@@ -181,8 +180,8 @@ void KuhnGameBuilder::add_betting_subtree(
     BuildContext& ctx,
     int parent_id,
     Player player_to_act,
-    CardId p0_card,
-    CardId p1_card,
+    phevaluator::Card p0_card,
+    phevaluator::Card p1_card,
     const std::string& history
 ) const {
     if (player_to_act != Player::P0 && player_to_act != Player::P1) {
@@ -260,8 +259,8 @@ int KuhnGameBuilder::add_terminal_node(
     BuildContext& ctx,
     int parent_id,
     holdem::ActionType incoming_action,
-    CardId p0_card,
-    CardId p1_card,
+    phevaluator::Card p0_card,
+    phevaluator::Card p1_card,
     const std::string& terminal_history
 ) const {
     const Node& parent = ctx.game.node(parent_id);
@@ -291,8 +290,8 @@ int KuhnGameBuilder::add_decision_node(
     int parent_id,
     holdem::ActionType incoming_action,
     Player player_to_act,
-    CardId /*p0_card*/,
-    CardId /*p1_card*/,
+    phevaluator::Card /*p0_card*/,
+    phevaluator::Card /*p1_card*/,
     const std::string& /*history*/
 ) const {
     if (player_to_act != Player::P0 && player_to_act != Player::P1) {
@@ -371,8 +370,8 @@ bool KuhnGameBuilder::is_terminal_history(
 }
 
 float KuhnGameBuilder::terminal_utility_p0(
-    CardId p0_card,
-    CardId p1_card,
+    phevaluator::Card p0_card,
+    phevaluator::Card p1_card,
     const std::string& terminal_history
 ) const {
     if (!is_terminal_history(terminal_history)) {
@@ -450,10 +449,10 @@ Player KuhnGameBuilder::next_player_after(
     );
 }
 
-CardId KuhnGameBuilder::private_card_for(
+phevaluator::Card KuhnGameBuilder::private_card_for(
     Player player,
-    CardId p0_card,
-    CardId p1_card
+    phevaluator::Card p0_card,
+    phevaluator::Card p1_card
 ) const {
     if (player == Player::P0) {
         return p0_card;

@@ -89,15 +89,15 @@ poker::holdem::BettingAbstraction make_test_abstraction() {
 }
 
 poker::Board test_river_board() {
-return poker::Board{
+    return poker::Board{
         {
-            poker::make_card(poker::Rank::Ace, poker::Suit::Spades),
-            poker::make_card(poker::Rank::Seven, poker::Suit::Hearts),
-            poker::make_card(poker::Rank::Two, poker::Suit::Clubs),
-            poker::make_card(poker::Rank::Jack, poker::Suit::Diamonds),
-            poker::make_card(poker::Rank::Four, poker::Suit::Spades)
+            phevaluator::Card("As"),
+            phevaluator::Card("7h"),
+            phevaluator::Card("Jh"),
+            phevaluator::Card("Ts"),
+            phevaluator::Card("3d"),
         }
-};
+    };
 }
 
 poker::holdem::PublicState make_initial_river_state() {

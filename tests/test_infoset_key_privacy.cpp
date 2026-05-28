@@ -6,7 +6,6 @@
 #include "holdem/street.hpp"
 
 #include "poker/board.hpp"
-#include "poker/card.hpp"
 #include "poker/hand.hpp"
 
 #include <cstdlib>
