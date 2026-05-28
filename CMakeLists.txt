@@ -115,12 +115,10 @@ add_library(kuhn_gpu_cfr_lib
         include/gpu_state.hpp
         include/cfr_gpu.hpp
 
-        include/poker/card.hpp
+        include/poker/board.hpp
         include/poker/deck_mask.hpp
         include/poker/hand.hpp
-        include/poker/board.hpp
         include/poker/range.hpp
-        include/poker/hand_evaluator.hpp
 
         include/holdem/street.hpp
         include/holdem/action.hpp
@@ -142,12 +140,12 @@ add_library(kuhn_gpu_cfr_lib
         src/exploitability.cpp
         src/cfr_gpu.cpp
 
-        src/poker/hand_evaluator.cpp
         src/holdem/betting_engine.cpp
         src/holdem/subgame_builder.cpp
 
         cuda/kernels.cu
         cuda/kernels.hpp
+        include/holdem/all_in_equity_cache.hpp
 )
 
 target_include_directories(kuhn_gpu_cfr_lib
@@ -227,30 +225,6 @@ target_link_libraries(test_betting_engine
 add_test(
         NAME test_betting_engine
         COMMAND test_betting_engine
-)
-
-add_executable(test_deck_mask
-        tests/test_deck_mask.cpp
-)
-target_link_libraries(test_deck_mask
-        PRIVATE
-        kuhn_gpu_cfr_lib
-)
-add_test(
-        NAME test_deck_mask
-        COMMAND test_deck_mask
-)
-
-add_executable(test_hand_evaluator
-        tests/test_hand_evaluator.cpp
-)
-target_link_libraries(test_hand_evaluator
-        PRIVATE
-        kuhn_gpu_cfr_lib
-)
-add_test(
-        NAME test_hand_evaluator
-        COMMAND test_hand_evaluator
 )
 
 add_executable(test_infoset_key_privacy
