@@ -204,8 +204,7 @@ poker::holdem::HoldemSubgameConfig make_base_config() {
     config.p0_range = make_p0_tiny_range();
     config.p1_range = make_p1_tiny_range();
 
-    config.expand_all_in_runouts = true;
-    config.collapse_all_in_runouts_to_ev = false;
+    config.collapse_all_in_runouts_to_ev = true;
     config.validate_tree_during_build = true;
     config.reject_preflop = true;
 

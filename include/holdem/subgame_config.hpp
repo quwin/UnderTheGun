@@ -20,77 +20,53 @@ struct HoldemSubgameConfig {
     // -------------------------------------------------------------------------
     // Starting public state
     // -------------------------------------------------------------------------
-
     Street start_street = Street::River;
     Board board;
-
     // Pot at the start of the subgame.
     //
     // Convention:
     //   pot_size already includes all chips committed before this subgame starts.
     int pot_size = 0;
-
     // Remaining effective stack for each player at the start of the subgame.
     //
     // For now this assumes symmetric effective stacks:
     //   p0_stack = effective_stack
     //   p1_stack = effective_stack
     int effective_stack = 0;
-
     Player player_to_act = Player::P0;
-
     // -------------------------------------------------------------------------
     // Private hand ranges
     // -------------------------------------------------------------------------
-
     Range p0_range;
     Range p1_range;
-
     // -------------------------------------------------------------------------
     // Betting abstraction
     // -------------------------------------------------------------------------
-
     BettingAbstraction betting_abstraction;
-
     // -------------------------------------------------------------------------
     // Optional card abstractions
     // -------------------------------------------------------------------------
-
     // Exact by default.
     std::shared_ptr<const HandAbstraction> hand_abstraction = make_exact_hand_abstraction();
-
     // Exact by default.
     std::shared_ptr<const BoardAbstraction> board_abstraction = make_exact_board_abstraction();
-
     // -------------------------------------------------------------------------
     // All-in handling
     // -------------------------------------------------------------------------
-
-    // If true, all-in calls before the river are represented by explicit
-    // public-card chance nodes and final showdown terminals.
-    bool expand_all_in_runouts = true;
-
     // If true, all-in calls before the river are collapsed into one expected-EV
     // terminal node.
-    //
-    // Do not set both collapse_all_in_runouts_to_ev and expand_all_in_runouts.
-    bool collapse_all_in_runouts_to_ev = false;
-
+    bool collapse_all_in_runouts_to_ev = true;
     // -------------------------------------------------------------------------
     // Builder/debug options
     // -------------------------------------------------------------------------
-
     // Useful for early testing. If true, builder may do extra expensive
     // consistency checks.
-    bool validate_tree_during_build = true;
-
+    bool validate_tree_during_build = false;
     // If true, reject preflop configs until preflop logic is implemented.
     bool reject_preflop = true;
-
     // -------------------------------------------------------------------------
     // Validation
     // -------------------------------------------------------------------------
-
     void validate() const {
         validate_street(start_street);
 
@@ -152,12 +128,6 @@ struct HoldemSubgameConfig {
             );
         }
 
-        if (expand_all_in_runouts && collapse_all_in_runouts_to_ev) {
-            throw std::invalid_argument(
-                "Cannot both expand and collapse all-in runouts."
-            );
-        }
-
         // Verify at least one legal private hand pair remains after board
         // blockers. This is potentially O(range^2), but config validation is
         // not in the CFR loop.
@@ -212,9 +182,7 @@ inline HoldemSubgameConfig make_default_river_subgame_config(
 
     config.hand_abstraction = make_exact_hand_abstraction();
     config.board_abstraction = make_exact_board_abstraction();
-
-    config.expand_all_in_runouts = true;
-    config.collapse_all_in_runouts_to_ev = false;
+    config.collapse_all_in_runouts_to_ev = true;
 
     config.validate();
 
@@ -242,8 +210,6 @@ inline HoldemSubgameConfig make_tiny_river_subgame_config(
 
     config.hand_abstraction = make_exact_hand_abstraction();
     config.board_abstraction = make_exact_board_abstraction();
-
-    config.expand_all_in_runouts = true;
     config.collapse_all_in_runouts_to_ev = false;
 
     config.validate();

@@ -133,7 +133,6 @@ poker::holdem::HoldemSubgameConfig make_test_config() {
     config.p1_range = make_tiny_p1_range();
 
     config.collapse_all_in_runouts_to_ev = true;
-    config.expand_all_in_runouts = false;
     config.validate_tree_during_build = false;
 
     config.betting_abstraction = poker::holdem::make_standard_abstraction();

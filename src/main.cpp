@@ -80,7 +80,6 @@ poker::holdem::HoldemSubgameConfig make_test_config() {
     config.player_to_act = poker::Player::P0;
 
     config.collapse_all_in_runouts_to_ev = true;
-    config.expand_all_in_runouts = false;
     config.validate_tree_during_build = false;
 
     config.p0_range = make_tiny_p0_range();
