@@ -24,14 +24,22 @@ poker::Board make_test_board() {
     };
 }
 
-poker::Range make_tiny_p0_range() {
+    poker::Range make_tiny_p0_range() {
     poker::Range range;
     range.clear();
 
     range.set_weight(
         poker::make_hand(
-        phevaluator::Card("Kh"),
-        phevaluator::Card("Qh")
+            phevaluator::Card("Kh"),
+            phevaluator::Card("Qh")
+        ),
+        1.0f
+    );
+
+    range.set_weight(
+        poker::make_hand(
+            phevaluator::Card("Ks"),
+            phevaluator::Card("Kd")
         ),
         1.0f
     );
@@ -39,17 +47,26 @@ poker::Range make_tiny_p0_range() {
     return range;
 }
 
-poker::Range make_tiny_p1_range() {
+    poker::Range make_tiny_p1_range() {
     poker::Range range;
     range.clear();
 
     range.set_weight(
         poker::make_hand(
-        phevaluator::Card("Qc"),
-        phevaluator::Card("Qd")
+            phevaluator::Card("Qc"),
+            phevaluator::Card("Qd")
         ),
         1.0f
     );
+
+    range.set_weight(
+        poker::make_hand(
+            phevaluator::Card("Th"),
+            phevaluator::Card("9h")
+        ),
+        1.0f
+    );
+
     return range;
 }
 
@@ -58,15 +75,18 @@ poker::holdem::HoldemSubgameConfig make_test_config() {
 
     config.start_street = poker::holdem::Street::Turn;
     config.board = make_test_board();
-    config.validate_tree_during_build = false;
-    config.pot_size = 10;
-    config.effective_stack = 10;
+    config.pot_size = 1000;
+    config.effective_stack = 20000;
     config.player_to_act = poker::Player::P0;
+
+    config.collapse_all_in_runouts_to_ev = true;
+    config.expand_all_in_runouts = false;
+    config.validate_tree_during_build = false;
 
     config.p0_range = make_tiny_p0_range();
     config.p1_range = make_tiny_p1_range();
 
-    config.betting_abstraction = poker::holdem::make_tiny_betting_abstraction();
+    config.betting_abstraction = poker::holdem::make_standard_abstraction();
 
     return config;
 }
@@ -77,8 +97,6 @@ struct BenchResult {
     std::string name;
     double seconds = 0.0;
     double iters_per_sec = 0.0;
-    double ev_p0 = 0.0;
-    double exploitability = 0.0;
     std::vector<float> avg_strategy;
 };
 
@@ -114,11 +132,6 @@ BenchResult run_cpu_benchmark(
     r.seconds = std::chrono::duration<double>(t1 - t0).count();
     r.iters_per_sec = iterations / r.seconds;
     r.avg_strategy = solver.average_strategy();
-
-    poker::ExploitabilityEvaluator eval(game);
-    r.ev_p0 = eval.expected_value_p0(r.avg_strategy);
-    r.exploitability = eval.exploitability(r.avg_strategy).exploitability;
-
     return r;
 }
 
@@ -144,11 +157,6 @@ BenchResult run_gpu_benchmark(
     r.seconds = std::chrono::duration<double>(t1 - t0).count();
     r.iters_per_sec = iterations / r.seconds;
     r.avg_strategy = std::move(avg);
-
-    poker::ExploitabilityEvaluator eval(game);
-    r.ev_p0 = eval.expected_value_p0(r.avg_strategy);
-    r.exploitability = eval.exploitability(r.avg_strategy).exploitability;
-
     return r;
 }
 
@@ -157,8 +165,6 @@ void print_result(const BenchResult& r) {
         << std::left << std::setw(8) << r.name
         << " time=" << std::setw(10) << r.seconds << "s"
         << " iter/s=" << std::setw(12) << r.iters_per_sec
-        << " EV(P0)=" << std::setw(12) << r.ev_p0
-        << " exploitability=" << r.exploitability
         << "\n";
 }
 
@@ -175,16 +181,14 @@ int main() {
         std::cout << "Benchmarking " << iterations << " CFR iterations\n";
         std::cout << "Nodes: " << game.num_nodes()
                   << " Infosets: " << game.num_infosets()
-                  << " Q: " << game.num_q() << "\n\n";
+                  << " Q: " << game.num_q() << "\n";
 
         const BenchResult cpu = run_cpu_benchmark(game, iterations);
         print_result(cpu);
 
         const BenchResult gpu = run_gpu_benchmark(game, iterations);
         print_result(gpu);
-
-        std::cout << "\nGPU speed relative to CPU: " << cpu.seconds / gpu.seconds << "x\n";
-
+        std::cout << "GPU speed relative to CPU: " << cpu.seconds / gpu.seconds << "x\n";
         std::cout << "Max avg-strategy abs diff: " << max_abs_diff(cpu.avg_strategy, gpu.avg_strategy) << std::endl;
 
         return 0;

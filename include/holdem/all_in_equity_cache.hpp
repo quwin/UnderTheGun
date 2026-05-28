@@ -238,7 +238,8 @@ private:
         // Smaller value is stronger, from 1 to 7462
         if (p0_rank < p1_rank) {
             return 1.0;
-        } else if (p1_rank == p0_rank) {
+        }
+        if (p1_rank == p0_rank) {
             return 0.5;
         }
         return 0.0;

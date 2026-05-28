@@ -1,10 +1,10 @@
 #include "kuhn_builder.hpp"
 
-#include <cassert>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
+#include "../external/PokerHandEvaluator/cpp/include/phevaluator/card.h"
 
 namespace poker {
 

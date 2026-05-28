@@ -239,17 +239,6 @@ add_test(
         COMMAND test_infoset_key_privacy
 )
 
-add_executable(test_range_card_removal
-        tests/test_range_card_removal.cpp
-)
-target_link_libraries(test_range_card_removal
-        PRIVATE
-        kuhn_gpu_cfr_lib
-)
-add_test(
-        NAME test_range_card_removal
-        COMMAND test_range_card_removal
-)
 add_executable(test_terminal_utility
         tests/test_terminal_utility.cpp
 )

@@ -150,10 +150,10 @@ poker::Range make_range_from_hand_labels(
 }
 
 std::string hand_type_from_hole_cards(const poker::HoleCards& hand) {
-  const char r1 = hand.a.describeSuit();
-  const char r2 = hand.b.describeSuit();
-  const int v1 = hand.a.describeRank();
-  const int v2 = hand.b.describeRank();
+  const char r1 = hand.a.describeRank();
+  const char r2 = hand.b.describeRank();
+  const int v1 = hand.a;
+  const int v2 = hand.b;
 
   char hi = r1;
   char lo = r2;
@@ -171,7 +171,7 @@ std::string hand_type_from_hole_cards(const poker::HoleCards& hand) {
 }
 
 std::string combo_label_from_hole_cards(const poker::HoleCards& hand) {
-  return poker::to_string(hand.a) + poker::to_string(hand.b);
+  return hand.a.describeCard() + hand.b.describeCard();
 }
 
 std::optional<int> extract_int_field(const std::string& key, const std::string& name) {
@@ -226,6 +226,7 @@ Fl_Color color_for_action(const poker::GameAction& action, int& bet_index) {
       switch (bet_index++) {
         case 0: return fl_rgb_color(245, 166, 35);
         case 1: return fl_rgb_color(224, 124, 84);
+        case 2: return fl_rgb_color(214, 100, 95);
         default: return fl_rgb_color(196, 69, 105);
       }
     }
@@ -461,16 +462,16 @@ class Wizard : public Fl_Double_Window {
     }
   }
 
-  poker::holdem::BettingAbstraction make_gui_betting_abstraction() const {
+  [[nodiscard]] poker::holdem::BettingAbstraction make_gui_betting_abstraction() const {
     poker::holdem::BettingAbstraction abstraction = poker::holdem::make_standard_abstraction();
     if (m_data.minBet > 0) {
-      abstraction.first_bet_sizes.push_back(poker::holdem::BetSize::fixed_amount(m_data.minBet));
+      abstraction.first_bet_sizes.insert(abstraction.first_bet_sizes.begin(), poker::holdem::BetSize::fixed_amount(m_data.minBet));
     }
     abstraction.validate();
     return abstraction;
   }
 
-  poker::Player initial_player_to_act() const {
+  [[nodiscard]] poker::Player initial_player_to_act() const {
     const int heroPos = RangeData::getPositionIndex(m_data.yourPos);
     const int villainPos = RangeData::getPositionIndex(m_data.theirPos);
     const bool hero_is_ip = heroPos > villainPos;
@@ -494,8 +495,6 @@ class Wizard : public Fl_Double_Window {
     config.p0_range = hero_range;
     config.p1_range = villain_range;
     config.betting_abstraction = make_gui_betting_abstraction();
-    config.hand_abstraction = poker::holdem::make_exact_hand_abstraction();
-    config.board_abstraction = poker::holdem::make_exact_board_abstraction();
     config.expand_all_in_runouts = false;
     config.collapse_all_in_runouts_to_ev = true;
     config.validate_tree_during_build = false;
@@ -515,103 +514,103 @@ class Wizard : public Fl_Double_Window {
           "Not enough memory for this solve. Try reducing range sizes or solving from a later street.");
     }
 
-    m_pg5->setStatus("Training native CFR solver...");
-    m_pg5->reset();
-    Fl::check();
-
-    const bool useGpu = std::string(m_pg1->getCFRRenderer()) == "GPU";
-    if (useGpu) {
-      poker::GpuCfrConfig cfr_config;
-      cfr_config.num_players = 2;
-      cfr_config.synchronize_each_iteration = false;
-      cfr_config.threads_per_block = 256;
-      cfr_config.use_cfr_plus = false;
-      cfr_config.linear_averaging = true;
-
-      m_game = std::make_unique<poker::Game>(std::move(built));
-      poker::GpuCfrSolver solver(*m_game, cfr_config);
-
-      const int total = std::max<int>(0, m_data.iterations);
-      const int chunk = std::max<int>(1, total / 100);
-      for (int done = 0; done < total;) {
-        const int step = std::min<int>(chunk, total - done);
-        solver.run_iterations(step);
-        done += step;
-        m_pg5->setIteration(done, total);
-        m_pg5->setProgress(done, total);
-        Fl::check();
-      }
-
-      m_average_strategy = solver.average_strategy();
-
-      {
-        std::ofstream log("under_the_gun_gui_debug.log", std::ios::app);
-        log << "=== GUI native solve complete ===\n";
-        log << "Nodes: " << m_game->num_nodes() << "\n";
-        log << "Infosets: " << m_game->num_infosets() << "\n";
-        log << "Q entries: " << m_game->num_q() << "\n";
-        log << "Iterations: " << total << "\n";
-        log << "Board: ";
-        for (const auto& card : m_data.board) log << card << ' ';
-        log << "\n\n";
-      }
-    } else {
-      poker::CfrConfig cfr_config;
-      cfr_config.num_players = 2;
-      cfr_config.use_cfr_plus = false;
-      cfr_config.linear_averaging = true;
-      cfr_config.simultaneous_updates = true;
-
-      m_game = std::make_unique<poker::Game>(std::move(built));
-      poker::CpuCfrSolver solver(*m_game, cfr_config);
-
-      const int total = std::max<int>(0, m_data.iterations);
-      const int chunk = std::max<int>(1, total / 100);
-      for (int done = 0; done < total;) {
-        const int step = std::min<int>(chunk, total - done);
-        solver.run_iterations(step);
-        done += step;
-        m_pg5->setIteration(done, total);
-        m_pg5->setProgress(done, total);
-        Fl::check();
-      }
-
-      m_average_strategy = solver.average_strategy();
-
-      {
-        std::ofstream log("under_the_gun_gui_debug.log", std::ios::app);
-        log << "=== GUI native solve complete ===\n";
-        log << "Nodes: " << m_game->num_nodes() << "\n";
-        log << "Infosets: " << m_game->num_infosets() << "\n";
-        log << "Q entries: " << m_game->num_q() << "\n";
-        log << "Iterations: " << total << "\n";
-        log << "Board: ";
-        for (const auto& card : m_data.board) log << card << ' ';
-        log << "\n\n";
-      }
-    }
-
-    reset_navigation_to_root_public_state();
-    m_history.clear();
-    m_overallStrategyCache.clear();
-
-    m_pg5->hide();
-    m_pg6->show();
-    updateStrategyDisplay();
-    Fl::check();
+    // m_pg5->setStatus("Training native CFR solver...");
+    // m_pg5->reset();
+    // Fl::check();
+    //
+    // const bool useGpu = std::string(m_pg1->getCFRRenderer()) == "GPU";
+    // if (useGpu) {
+    //   poker::GpuCfrConfig cfr_config;
+    //   cfr_config.num_players = 2;
+    //   cfr_config.synchronize_each_iteration = false;
+    //   cfr_config.threads_per_block = 512;
+    //   cfr_config.use_cfr_plus = false;
+    //   cfr_config.linear_averaging = false;
+    //
+    //   m_game = std::make_unique<poker::Game>(std::move(built));
+    //   poker::GpuCfrSolver solver(*m_game, cfr_config);
+    //
+    //   const int total = std::max<int>(0, m_data.iterations);
+    //   const int chunk = std::max<int>(1, total / 100);
+    //   for (int done = 0; done < total;) {
+    //     const int step = std::min<int>(chunk, total - done);
+    //     solver.run_iterations(step);
+    //     done += step;
+    //     m_pg5->setIteration(done, total);
+    //     m_pg5->setProgress(done, total);
+    //     Fl::check();
+    //   }
+    //
+    //   m_average_strategy = solver.average_strategy();
+    //
+    //   {
+    //     std::ofstream log("under_the_gun_gui_debug.log", std::ios::app);
+    //     log << "=== GUI native solve complete ===\n";
+    //     log << "Nodes: " << m_game->num_nodes() << "\n";
+    //     log << "Infosets: " << m_game->num_infosets() << "\n";
+    //     log << "Q entries: " << m_game->num_q() << "\n";
+    //     log << "Iterations: " << total << "\n";
+    //     log << "Board: ";
+    //     for (const auto& card : m_data.board) log << card << ' ';
+    //     log << "\n\n";
+    //   }
+    // } else {
+    //   poker::CfrConfig cfr_config;
+    //   cfr_config.num_players = 2;
+    //   cfr_config.use_cfr_plus = false;
+    //   cfr_config.linear_averaging = false;
+    //   cfr_config.simultaneous_updates = true;
+    //
+    //   m_game = std::make_unique<poker::Game>(std::move(built));
+    //   poker::CpuCfrSolver solver(*m_game, cfr_config);
+    //
+    //   const int total = std::max<int>(0, m_data.iterations);
+    //   const int chunk = std::max<int>(1, total / 100);
+    //   for (int done = 0; done < total;) {
+    //     const int step = std::min<int>(chunk, total - done);
+    //     solver.run_iterations(step);
+    //     done += step;
+    //     m_pg5->setIteration(done, total);
+    //     m_pg5->setProgress(done, total);
+    //     Fl::check();
+    //   }
+    //
+    //   m_average_strategy = solver.average_strategy();
+    //
+    //   {
+    //     std::ofstream log("under_the_gun_gui_debug.log", std::ios::app);
+    //     log << "=== GUI native solve complete ===\n";
+    //     log << "Nodes: " << m_game->num_nodes() << "\n";
+    //     log << "Infosets: " << m_game->num_infosets() << "\n";
+    //     log << "Q entries: " << m_game->num_q() << "\n";
+    //     log << "Iterations: " << total << "\n";
+    //     log << "Board: ";
+    //     for (const auto& card : m_data.board) log << card << ' ';
+    //     log << "\n\n";
+    //   }
+    // }
+    //
+    // reset_navigation_to_root_public_state();
+    // m_history.clear();
+    // m_overallStrategyCache.clear();
+    //
+    // m_pg5->hide();
+    // m_pg6->show();
+    // updateStrategyDisplay();
+    // Fl::check();
   }
 
-  std::size_t estimate_game_memory(const poker::Game& game) const {
+  static std::size_t estimate_game_memory(const poker::Game& game) {
     std::size_t bytes = sizeof(poker::Game);
-    bytes += game.nodes.size() * sizeof(poker::Node);
-    bytes += game.infosets.size() * sizeof(poker::InfoSet);
-    bytes += game.q_entries.size() * sizeof(poker::InfoSetAction);
+    bytes += game.nodes.capacity() * sizeof(poker::Node);
+    bytes += game.infosets.capacity() * sizeof(poker::InfoSet);
+    bytes += game.q_entries.capacity() * sizeof(poker::InfoSetAction);
     bytes += game.num_q() * sizeof(float) * 4;
     for (const poker::Node& node : game.nodes) bytes += node.children.size() * sizeof(int);
     for (const poker::InfoSet& infoset : game.infosets) {
-      bytes += infoset.actions.size() * sizeof(poker::GameAction);
-      bytes += infoset.q_indices.size() * sizeof(int);
-      bytes += infoset.key.size();
+      bytes += infoset.actions.capacity() * sizeof(poker::GameAction);
+      bytes += infoset.q_indices.capacity() * sizeof(int);
+      bytes += infoset.key.capacity();
     }
     return bytes;
   }

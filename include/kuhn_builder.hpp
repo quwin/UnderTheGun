@@ -2,11 +2,9 @@
 
 #include "game.hpp"
 #include "holdem/action.hpp"
-
+#include "../external/PokerHandEvaluator/cpp/include/phevaluator/card.h"
 #include <string>
 #include <vector>
-
-#include "phevaluator/phevaluator.h"
 
 namespace poker {
 
