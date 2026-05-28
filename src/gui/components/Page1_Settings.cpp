@@ -140,6 +140,19 @@ Page1_Settings::Page1_Settings(int X, int Y, int W, int H)
   m_inpThreads->value(std::to_string(defaultThreads).c_str());
   m_grid->widget(m_inpThreads, 9, 2);
 
+  // Row 10: CFR Renderer
+  auto *lblCfrRenderer = new Fl_Box(0, 0, 0, 0, "Solver Renderer:");
+  lblCfrRenderer->labelsize(24);
+  lblCfrRenderer->labelfont(FL_HELVETICA_BOLD);
+  lblCfrRenderer->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
+  m_grid->widget(lblCfrRenderer, 10, 1);
+
+  m_choCFRRenderer = new Fl_Choice(0, 0, 0, 0);
+  m_choCFRRenderer->textsize(24);
+  m_choCFRRenderer->add("CPU|GPU");
+  m_choCFRRenderer->value(0);
+  m_grid->widget(m_choCFRRenderer, 10, 2);
+
   // Column 4: Options on the right side (column 3 is gap)
   // Auto-import checkbox (row 0, aligned with Stack Size)
   m_chkAutoImport = new Fl_Check_Button(0, 0, 0, 0, "Auto-import ranges");
@@ -207,7 +220,7 @@ Page1_Settings::Page1_Settings(int X, int Y, int W, int H)
   m_logoBox->align(FL_ALIGN_CENTER | FL_ALIGN_INSIDE);
 
   // Developer credit (positioned below logo)
-  m_lblCredit = new Fl_Box(0, 0, 0, 0, "Developed by Anubhav Parida");
+  m_lblCredit = new Fl_Box(0, 0, 0, 0, "Developed by Ethan Tran, GUI credit to Anubhav Parida");
   m_lblCredit->labelsize(16);
   m_lblCredit->labelfont(FL_TIMES_ITALIC);
   m_lblCredit->align(FL_ALIGN_RIGHT | FL_ALIGN_INSIDE);
@@ -335,6 +348,10 @@ float Page1_Settings::getMinExploitability() const {
 
 const char* Page1_Settings::getPotType() const {
   return m_choPotType->text();
+}
+
+const char* Page1_Settings::getCFRRenderer() const {
+  return m_choCFRRenderer->text();
 }
 
 const char* Page1_Settings::getYourPosition() const {

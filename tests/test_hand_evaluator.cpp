@@ -36,7 +36,17 @@ void check_eq(
 poker::CardId c(poker::Rank rank, poker::Suit suit) {
     return poker::make_card(rank, suit);
 }
-
+    poker::Board make_river_board() {
+        return poker::Board{
+                {
+                    c(poker::Rank::Ace,   poker::Suit::Spades),
+                    c(poker::Rank::Seven, poker::Suit::Hearts),
+                    c(poker::Rank::Two,   poker::Suit::Clubs),
+                    c(poker::Rank::Jack,  poker::Suit::Diamonds),
+                    c(poker::Rank::Four,  poker::Suit::Spades)
+                }
+        };
+    }
 poker::HoleCards hand(
     poker::CardId a,
     poker::CardId b
@@ -86,7 +96,48 @@ void check_compare_zero(
 ) {
     check(result == 0, message);
 }
+void test_river_fixture_hand_comparisons() {
+    poker::HandEvaluator evaluator;
+    const poker::Board board = make_river_board();
 
+    const auto qhkh = poker::make_hole_cards(
+        c(poker::Rank::Queen, poker::Suit::Hearts),
+        c(poker::Rank::King, poker::Suit::Hearts)
+    );
+
+    const auto kdks = poker::make_hole_cards(
+        c(poker::Rank::King, poker::Suit::Diamonds),
+        c(poker::Rank::King, poker::Suit::Spades)
+    );
+
+    const auto qcqd = poker::make_hole_cards(
+        c(poker::Rank::Queen, poker::Suit::Clubs),
+        c(poker::Rank::Queen, poker::Suit::Diamonds)
+    );
+
+    const auto h9ht = poker::make_hole_cards(
+        c(poker::Rank::Nine, poker::Suit::Hearts),
+        c(poker::Rank::Ten, poker::Suit::Hearts)
+    );
+
+    check(
+        evaluator.compare_7(qhkh, qcqd, board) < 0,
+        "QhKh should lose to QcQd."
+    );
+    check(
+        evaluator.compare_7(qhkh, h9ht, board) > 0,
+        "QhKh should beat 9hTh."
+    );
+    check(
+        evaluator.compare_7(kdks, qcqd, board) > 0,
+        "KdKs should beat QcQd."
+    );
+    check(
+        evaluator.compare_7(kdks, h9ht, board) > 0,
+        "KdKs should beat 9hTh."
+    );
+    std::cout << "[pass] test_river_fixture_hand_comparisons\n";
+}
 void test_high_card_category() {
     const poker::HandEvaluator evaluator;
 
@@ -690,6 +741,7 @@ void test_incomplete_board_throws_for_7_card_eval() {
 }
 
 void run_all_tests() {
+    test_river_fixture_hand_comparisons();
     test_high_card_category();
     test_one_pair_category();
     test_two_pair_category();

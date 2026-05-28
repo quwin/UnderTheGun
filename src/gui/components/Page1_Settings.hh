@@ -14,7 +14,7 @@ class Page1_Settings : public Fl_Group {
   Fl_Grid *m_grid;
   Fl_Input *m_inpStack, *m_inpPot, *m_inpMinBet, *m_inpIters;
   Fl_Float_Input *m_inpAllIn, *m_inpMinExploit, *m_inpThreads;
-  Fl_Choice *m_choPotType, *m_choYourPos, *m_choTheirPos;
+  Fl_Choice *m_choPotType, *m_choYourPos, *m_choTheirPos, *m_choCFRRenderer;
   Fl_Check_Button *m_chkAutoImport, *m_chkForceDonkCheck;
   Fl_Button *m_btnNext;
 
@@ -55,6 +55,9 @@ public:
   float getAllInThreshold() const;
   float getMinExploitability() const;
   const char* getPotType() const;
+
+  const char *getCFRRenderer() const;
+
   const char* getYourPosition() const;
   const char* getTheirPosition() const;
   bool getAutoImport() const;

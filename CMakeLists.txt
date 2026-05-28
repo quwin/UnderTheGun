@@ -204,6 +204,19 @@ set_target_properties(UnderTheGun
 
 enable_testing()
 
+add_executable(test_solver_validity
+        tests/test_solver_validity.cpp
+)
+target_link_libraries(test_solver_validity
+        PRIVATE
+        kuhn_gpu_cfr_lib
+)
+add_test(
+        NAME test_solver_validity
+        COMMAND test_solver_validity
+)
+
+
 add_executable(test_betting_engine
         tests/test_betting_engine.cpp
 )

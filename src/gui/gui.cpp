@@ -503,7 +503,7 @@ class Wizard : public Fl_Double_Window {
   }
 
   poker::holdem::BettingAbstraction make_gui_betting_abstraction() const {
-    poker::holdem::BettingAbstraction abstraction = poker::holdem::make_standard_river_abstraction();
+    poker::holdem::BettingAbstraction abstraction = poker::holdem::make_standard_abstraction();
     if (m_data.minBet > 0) {
       abstraction.first_bet_sizes.push_back(poker::holdem::BetSize::fixed_amount(m_data.minBet));
     }
@@ -537,9 +537,9 @@ class Wizard : public Fl_Double_Window {
     config.betting_abstraction = make_gui_betting_abstraction();
     config.hand_abstraction = poker::holdem::make_exact_hand_abstraction();
     config.board_abstraction = poker::holdem::make_exact_board_abstraction();
-    config.expand_all_in_runouts = true;
-    config.collapse_all_in_runouts_to_ev = false;
-    config.validate_tree_during_build = true;
+    config.expand_all_in_runouts = false;
+    config.collapse_all_in_runouts_to_ev = true;
+    config.validate_tree_during_build = false;
     config.reject_preflop = true;
 
     m_pg5->setStatus("Building native Hold'em subgame tree...");
@@ -560,38 +560,76 @@ class Wizard : public Fl_Double_Window {
     m_pg5->reset();
     Fl::check();
 
-    poker::CfrConfig cfr_config;
-    cfr_config.num_players = 2;
-    cfr_config.simultaneous_updates = true;
-    cfr_config.use_cfr_plus = true;
-    cfr_config.linear_averaging = true;
+    const bool useGpu = std::string(m_pg1->getCFRRenderer()) == "GPU";
+    if (useGpu) {
+      poker::GpuCfrConfig cfr_config;
+      cfr_config.num_players = 2;
+      cfr_config.synchronize_each_iteration = false;
+      cfr_config.threads_per_block = 256;
+      cfr_config.use_cfr_plus = false;
+      cfr_config.linear_averaging = true;
 
-    m_game = std::make_unique<poker::Game>(std::move(built));
-    poker::CpuCfrSolver solver(*m_game, cfr_config);
+      m_game = std::make_unique<poker::Game>(std::move(built));
+      poker::GpuCfrSolver solver(*m_game, cfr_config);
 
-    const int total = std::max<int>(0, m_data.iterations);
-    const int chunk = std::max<int>(1, total / 100);
-    for (int done = 0; done < total;) {
-      const int step = std::min<int>(chunk, total - done);
-      solver.run_iterations(step);
-      done += step;
-      m_pg5->setIteration(done, total);
-      m_pg5->setProgress(done, total);
-      Fl::check();
-    }
+      const int total = std::max<int>(0, m_data.iterations);
+      const int chunk = std::max<int>(1, total / 100);
+      for (int done = 0; done < total;) {
+        const int step = std::min<int>(chunk, total - done);
+        solver.run_iterations(step);
+        done += step;
+        m_pg5->setIteration(done, total);
+        m_pg5->setProgress(done, total);
+        Fl::check();
+      }
 
-    m_average_strategy = solver.average_strategy();
+      m_average_strategy = solver.average_strategy();
 
-    {
-      std::ofstream log("under_the_gun_gui_debug.log", std::ios::app);
-      log << "=== GUI native solve complete ===\n";
-      log << "Nodes: " << m_game->num_nodes() << "\n";
-      log << "Infosets: " << m_game->num_infosets() << "\n";
-      log << "Q entries: " << m_game->num_q() << "\n";
-      log << "Iterations: " << total << "\n";
-      log << "Board: ";
-      for (const auto& card : m_data.board) log << card << ' ';
-      log << "\n\n";
+      {
+        std::ofstream log("under_the_gun_gui_debug.log", std::ios::app);
+        log << "=== GUI native solve complete ===\n";
+        log << "Nodes: " << m_game->num_nodes() << "\n";
+        log << "Infosets: " << m_game->num_infosets() << "\n";
+        log << "Q entries: " << m_game->num_q() << "\n";
+        log << "Iterations: " << total << "\n";
+        log << "Board: ";
+        for (const auto& card : m_data.board) log << card << ' ';
+        log << "\n\n";
+      }
+    } else {
+      poker::CfrConfig cfr_config;
+      cfr_config.num_players = 2;
+      cfr_config.use_cfr_plus = false;
+      cfr_config.linear_averaging = true;
+      cfr_config.simultaneous_updates = true;
+
+      m_game = std::make_unique<poker::Game>(std::move(built));
+      poker::CpuCfrSolver solver(*m_game, cfr_config);
+
+      const int total = std::max<int>(0, m_data.iterations);
+      const int chunk = std::max<int>(1, total / 100);
+      for (int done = 0; done < total;) {
+        const int step = std::min<int>(chunk, total - done);
+        solver.run_iterations(step);
+        done += step;
+        m_pg5->setIteration(done, total);
+        m_pg5->setProgress(done, total);
+        Fl::check();
+      }
+
+      m_average_strategy = solver.average_strategy();
+
+      {
+        std::ofstream log("under_the_gun_gui_debug.log", std::ios::app);
+        log << "=== GUI native solve complete ===\n";
+        log << "Nodes: " << m_game->num_nodes() << "\n";
+        log << "Infosets: " << m_game->num_infosets() << "\n";
+        log << "Q entries: " << m_game->num_q() << "\n";
+        log << "Iterations: " << total << "\n";
+        log << "Board: ";
+        for (const auto& card : m_data.board) log << card << ' ';
+        log << "\n\n";
+      }
     }
 
     reset_navigation_to_root_public_state();
@@ -935,49 +973,114 @@ class Wizard : public Fl_Double_Window {
     updateStrategyDisplay();
   }
 
-  void handleHandSelect(const std::string &hand) {
-    if (!m_game) return;
+  void handleHandSelect(const std::string& hand) {
+    if (!m_game) {
+        return;
+    }
     const auto action_nodes = current_action_nodes();
-    if (action_nodes.empty()) return;
-
+    if (action_nodes.empty()) {
+        return;
+    }
     const auto actions = representative_actions();
+    if (actions.empty()) {
+        showOverallStrategyWithHeader("No actions available");
+        return;
+    }
     std::vector<Fl_Color> actionColors;
+    actionColors.reserve(actions.size());
     int betIndex = 0;
-    for (const auto &action : actions) actionColors.push_back(color_for_action(action, betIndex));
+    for (const auto& action : actions) {
+        actionColors.push_back(color_for_action(action, betIndex));
+    }
+    std::map<std::string, std::vector<double>> combo_action_sum;
+    std::map<std::string, int> combo_count;
+    for (int node_id : action_nodes) {
+        const poker::Node& node = m_game->node(node_id);
+
+        if (node.infoset < 0) {
+            continue;
+        }
+
+        const poker::InfoSet& infoset = m_game->infoset(node.infoset);
+
+        const auto maybe_hand = hand_from_infoset_key(infoset.key);
+        if (!maybe_hand) {
+            continue;
+        }
+
+        if (hand_type_from_hole_cards(*maybe_hand) != hand) {
+            continue;
+        }
+
+        const std::string combo_label =
+            combo_label_from_hole_cards(*maybe_hand);
+
+        auto& sums = combo_action_sum[combo_label];
+        if (sums.empty()) {
+            sums.assign(actions.size(), 0.0);
+        }
+
+        for (std::size_t a = 0;
+             a < actions.size() && a < infoset.q_indices.size();
+             ++a) {
+            const int q = infoset.q_indices[a];
+
+            const float prob =
+                (q >= 0 && q < static_cast<int>(m_average_strategy.size()))
+                    ? m_average_strategy[q]
+                    : 0.0f;
+
+            sums[a] += static_cast<double>(prob);
+        }
+
+        combo_count[combo_label] += 1;
+    }
 
     std::vector<ComboStrategyDisplay::ComboStrategy> combos;
+    combos.reserve(combo_action_sum.size());
 
-    for (int node_id : action_nodes) {
-      const poker::Node& node = m_game->node(node_id);
-      const poker::InfoSet& infoset = m_game->infoset(node.infoset);
-      const auto maybe_hand = hand_from_infoset_key(infoset.key);
-      if (!maybe_hand) continue;
-      if (hand_type_from_hole_cards(*maybe_hand) != hand) continue;
+    for (const auto& entry : combo_action_sum) {
+        const std::string& combo_label = entry.first;
+        const std::vector<double>& sums = entry.second;
 
-      ComboStrategyDisplay::ComboStrategy comboStrat;
-      comboStrat.combo = combo_label_from_hole_cards(*maybe_hand);
-
-      for (std::size_t a = 0; a < actions.size() && a < infoset.q_indices.size(); ++a) {
-        const int q = infoset.q_indices[a];
-        const float prob = (q >= 0 && q < static_cast<int>(m_average_strategy.size())) ? m_average_strategy[q] : 0.0f;
-        if (prob > 0.001f) {
-          ComboStrategyDisplay::ActionProb ap;
-          ap.name = action_label(actions[a]);
-          ap.prob = prob;
-          ap.color = actionColors[a];
-          comboStrat.actions.push_back(ap);
+        const auto count_it = combo_count.find(combo_label);
+        if (count_it == combo_count.end() || count_it->second <= 0) {
+            continue;
         }
-      }
 
-      if (!comboStrat.actions.empty()) combos.push_back(comboStrat);
+        const int count = count_it->second;
+
+        ComboStrategyDisplay::ComboStrategy comboStrat;
+        comboStrat.combo = combo_label;
+
+        for (std::size_t a = 0; a < actions.size() && a < sums.size(); ++a) {
+            const float prob =
+                static_cast<float>(sums[a] / static_cast<double>(count));
+
+            if (prob <= 0.001f) {
+                continue;
+            }
+
+            ComboStrategyDisplay::ActionProb ap;
+            ap.name = action_label(actions[a]);
+            ap.prob = prob;
+            ap.color = actionColors[a];
+
+            comboStrat.actions.push_back(ap);
+        }
+
+        if (!comboStrat.actions.empty()) {
+            combos.push_back(comboStrat);
+        }
     }
 
     if (combos.empty()) {
-      showOverallStrategyWithHeader("Hand not in range");
-    } else {
-      m_pg6->setComboStrategies(hand, combos);
+        showOverallStrategyWithHeader("Hand not in range");
+        return;
     }
-  }
+
+    m_pg6->setComboStrategies(hand, combos);
+}
 
   std::string generateRangeString() {
     if (!m_game) return "";
@@ -1148,7 +1251,7 @@ int main(int argc, char **argv) {
 
   fl_message_font(FL_HELVETICA, FL_NORMAL_SIZE * 2);
   fl_message_hotspot(1);
-  Wizard wiz("Shark 2.0");
+  Wizard wiz("Under The Gun: PostFlop Poker Solver");
   wiz.show(argc, argv);
 
 #ifdef _WIN32

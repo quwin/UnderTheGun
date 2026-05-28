@@ -363,24 +363,24 @@ namespace {
             to_phe_card(p0_hand.a),
             to_phe_card(p0_hand.b),
             to_phe_card(board.cards[0]),
+            to_phe_card(board.cards[1]),
+            to_phe_card(board.cards[2]),
             to_phe_card(board.cards[3]),
-            to_phe_card(board.cards[4]),
-            to_phe_card(board.cards[5]),
-            to_phe_card(board.cards[6])
+            to_phe_card(board.cards[4])
         );
         const phevaluator::Rank p1_rank = phevaluator::EvaluateCards(
             to_phe_card(p1_hand.a),
             to_phe_card(p1_hand.b),
             to_phe_card(board.cards[0]),
+            to_phe_card(board.cards[1]),
+            to_phe_card(board.cards[2]),
             to_phe_card(board.cards[3]),
-            to_phe_card(board.cards[4]),
-            to_phe_card(board.cards[5]),
-            to_phe_card(board.cards[6])
+            to_phe_card(board.cards[4])
         );
-        if (p0_rank.value() > p1_rank.value()) {
+        if (p0_rank.value() < p1_rank.value()) {
             return 1;
         }
-        if (p1_rank.value() > p0_rank.value()) {
+        if (p1_rank.value() < p0_rank.value()) {
             return -1;
         }
         return 0;

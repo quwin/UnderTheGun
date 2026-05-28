@@ -155,12 +155,11 @@ inline BettingAbstraction make_tiny_betting_abstraction() {
     return abstraction;
 }
 
-inline BettingAbstraction make_standard_river_abstraction() {
+inline BettingAbstraction make_standard_abstraction() {
     BettingAbstraction abstraction;
 
     abstraction.first_bet_sizes = {
-        BetSize::pot_fraction(0.33),
-        BetSize::pot_fraction(0.75),
+        BetSize::pot_fraction(0.50),
         BetSize::pot_fraction(1.0),
         BetSize::all_in()
     };

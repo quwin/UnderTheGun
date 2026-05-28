@@ -209,7 +209,7 @@ inline HoldemSubgameConfig make_default_river_subgame_config(
     config.p0_range = p0_range;
     config.p1_range = p1_range;
 
-    config.betting_abstraction = make_standard_river_abstraction();
+    config.betting_abstraction = make_standard_abstraction();
 
     config.hand_abstraction = make_exact_hand_abstraction();
     config.board_abstraction = make_exact_board_abstraction();

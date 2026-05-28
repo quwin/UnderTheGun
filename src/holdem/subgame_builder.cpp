@@ -157,8 +157,7 @@ namespace {
         int root_id,
         const PublicState& initial_public_state
     ) const {
-        const std::vector<PrivateDealOutcome> deals =
-            chance_model_.private_deal_outcomes(config_);
+        const std::vector<PrivateDealOutcome> deals = chance_model_.private_deal_outcomes(config_);
 
         for (const PrivateDealOutcome& deal : deals) {
             Node child;
