@@ -1,4 +1,3 @@
-#include "kuhn_builder.hpp"
 #include "cfr_cpu.hpp"
 #include "exploitability.hpp"
 
@@ -14,6 +13,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "kuhn_builder.hpp"
 
 namespace {
 
@@ -125,8 +126,7 @@ void print_strategy(
         std::cout
             << "Infoset " << infoset.id
             << " | player=" << poker::to_string(infoset.player)
-            << " | card=" << poker::to_string(infoset.private_card)
-            << " | history=\"" << infoset.public_history << "\"\n";
+            << " | history=\"" << infoset.key << "\"\n";
 
         for (int local_action = 0;
              local_action < static_cast<int>(infoset.actions.size());
