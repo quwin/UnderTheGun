@@ -33,7 +33,6 @@ struct Board {
     std::vector<phevaluator::Card> cards;
 
     Board() = default;
-
     explicit Board(std::vector<phevaluator::Card> input)
         : cards(std::move(input)) {
         validate();
@@ -57,7 +56,6 @@ struct Board {
     [[nodiscard]] bool is_river() const {
         return cards.size() == 5;
     }
-
     [[nodiscard]] BoardStreet street() const {
         switch (cards.size()) {
             case 0: return BoardStreet::PreFlop;
@@ -68,7 +66,6 @@ struct Board {
                 throw std::logic_error("Invalid board size for Hold'em street.");
         }
     }
-
     phevaluator::Card operator[](std::size_t index) const {
         return cards.at(index);
     }
@@ -102,7 +99,7 @@ struct Board {
         return next;
     }
     void validate() const {
-        if (!(cards.size() == 0 ||
+        if (!(cards.empty() ||
               cards.size() == 3 ||
               cards.size() == 4 ||
               cards.size() == 5)) {

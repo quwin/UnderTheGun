@@ -56,7 +56,7 @@ std::vector<Action> BettingEngine::legal_actions(
     state.validate();
     abstraction.validate();
 
-    if (state.terminal) {
+    if (state.is_terminal()) {
         return {};
     }
 
@@ -78,7 +78,20 @@ std::vector<Action> BettingEngine::legal_actions(
     // This can happen after one player called and the round is already closed.
     return {};
 }
+    Player BettingEngine::opponent_of(Player player) {
+        switch (player) {
+            case Player::P0:
+                return Player::P1;
 
+            case Player::P1:
+                return Player::P0;
+
+            default:
+                throw std::invalid_argument(
+                    "BettingEngine::opponent_of requires P0 or P1."
+                );
+        }
+    }
 PublicState BettingEngine::apply_action(
     const PublicState& state,
     const Action& action
@@ -87,10 +100,8 @@ PublicState BettingEngine::apply_action(
     validate_action_basic(state, action);
 
     PublicState next = state;
-
+    ++next.betting.actions_this_street;
     const Player actor = state.player_to_act;
-    const Player opponent = opponent_of(actor);
-
     switch (action.type) {
         case ActionType::Fold: {
             if (!is_facing_bet(state)) {
@@ -98,13 +109,13 @@ PublicState BettingEngine::apply_action(
                     "Cannot fold when not facing a bet."
                 );
             }
-
-            next.terminal = true;
-            next.terminal_reason = TerminalReason::Fold;
+            if (actor == Player::P0) {
+                next.terminal_type = TerminalType::P0_Fold;
+            }
+            if (actor == Player::P1) {
+                next.terminal_type = TerminalType::P1_Fold;
+            }
             next.player_to_act = Player::Terminal;
-            next.folded_player = actor;
-            next.winner = opponent;
-            append_action_history(next, action);
             next.validate();
             return next;
         }
@@ -115,9 +126,6 @@ PublicState BettingEngine::apply_action(
                     "Cannot check while facing a bet."
                 );
             }
-
-            next.betting.last_action_was_check = true;
-            append_action_history(next, action);
             switch_player_to_act(next);
             next.validate();
             return next;
@@ -144,19 +152,11 @@ PublicState BettingEngine::apply_action(
                 target_commitment - actor_committed(state);
 
             commit_chips(next, actor, additional);
-
-            next.betting.round_has_bet = true;
             next.betting.current_bet_to_call = target_commitment;
-            next.betting.last_raise_size = target_commitment;
-            next.betting.last_aggressor = actor;
-            next.betting.last_action_was_check = false;
-
-            append_action_history(next, action);
             switch_player_to_act(next);
             next.validate();
             return next;
         }
-
         case ActionType::Raise: {
             if (!is_facing_bet(state)) {
                 throw std::invalid_argument(
@@ -183,15 +183,8 @@ PublicState BettingEngine::apply_action(
 
             commit_chips(next, actor, additional);
 
-            next.betting.round_has_bet = true;
             next.betting.current_bet_to_call = target_commitment;
-            next.betting.last_raise_size =
-                target_commitment - previous_bet_to_call;
             next.betting.num_raises_this_street += 1;
-            next.betting.last_aggressor = actor;
-            next.betting.last_action_was_check = false;
-
-            append_action_history(next, action);
             switch_player_to_act(next);
             next.validate();
             return next;
@@ -214,20 +207,12 @@ PublicState BettingEngine::apply_action(
 
             commit_chips(next, actor, action.amount);
 
-            next.betting.last_action_was_check = false;
-            append_action_history(next, action);
-
-            if (next.street != Street::River &&
-                is_all_in_terminal_for_betting(next)) {
-                next.terminal = true;
-                next.terminal_reason = TerminalReason::AllInCalled;
+            if (!next.board.is_river() && is_all_in_terminal_for_betting(next)) {
+                next.terminal_type = TerminalType::AllIn;
                 next.player_to_act = Player::Terminal;
-                next.folded_player = Player::Terminal;
-                next.winner = Player::Terminal;
             } else {
                 switch_player_to_act(next);
             }
-
             next.validate();
             return next;
         }
@@ -253,14 +238,7 @@ PublicState BettingEngine::apply_action(
 
             if (is_unopened_pot(state)) {
                 commit_chips(next, actor, additional);
-
-                next.betting.round_has_bet = true;
                 next.betting.current_bet_to_call = target_commitment;
-                next.betting.last_raise_size = target_commitment;
-                next.betting.last_aggressor = actor;
-                next.betting.last_action_was_check = false;
-
-                append_action_history(next, action);
                 switch_player_to_act(next);
                 next.validate();
                 return next;
@@ -272,23 +250,15 @@ PublicState BettingEngine::apply_action(
                 );
             }
 
-            const int previous_bet_to_call =
-                state.betting.current_bet_to_call;
+            const int previous_bet_to_call = state.betting.current_bet_to_call;
 
             commit_chips(next, actor, additional);
-            next.betting.last_action_was_check = false;
-
             if (target_commitment <= previous_bet_to_call) {
                 // All-in call. This may be a full call or short all-in call.
-                append_action_history(next, action);
-
-                if (next.street != Street::River &&
+                if (!next.board.is_river() &&
                     is_all_in_terminal_for_betting(next)) {
-                    next.terminal = true;
-                    next.terminal_reason = TerminalReason::AllInCalled;
+                    next.terminal_type = TerminalType::AllIn;
                     next.player_to_act = Player::Terminal;
-                    next.folded_player = Player::Terminal;
-                    next.winner = Player::Terminal;
                 } else {
                     switch_player_to_act(next);
                 }
@@ -298,14 +268,8 @@ PublicState BettingEngine::apply_action(
             }
 
             // All-in raise.
-            next.betting.round_has_bet = true;
             next.betting.current_bet_to_call = target_commitment;
-            next.betting.last_raise_size =
-                target_commitment - previous_bet_to_call;
             next.betting.num_raises_this_street += 1;
-            next.betting.last_aggressor = actor;
-
-            append_action_history(next, action);
             switch_player_to_act(next);
             next.validate();
             return next;
@@ -317,13 +281,16 @@ PublicState BettingEngine::apply_action(
 
     bool BettingEngine::betting_round_closed(
         const PublicState& state
-    ) const {
+    ) {
         state.validate();
-        if (state.terminal) {
+        if (state.is_terminal()) {
             return true;
         }
-        if (!state.betting.round_has_bet) {
-            return state.betting.actions_this_street >= 2 && state.betting.last_action_was_check;
+        if (state.betting.both_players_checked()) {
+            return true;
+        }
+        if (state.betting.bet_was_called()) {
+            return true;
         }
 
     return state.betting.current_bet_to_call > 0 && state.betting.commitments_matched();
@@ -331,22 +298,19 @@ PublicState BettingEngine::apply_action(
 
 bool BettingEngine::is_fold_terminal(
     const PublicState& state
-) const {
-    return state.terminal &&
-           state.terminal_reason == TerminalReason::Fold;
+) {
+    return state.is_terminal() && (state.terminal_type == TerminalType::P0_Fold || state.terminal_type == TerminalType::P1_Fold);
 }
 
 bool BettingEngine::is_all_in_terminal_for_betting(
     const PublicState& state
-) const {
-    if (!state.betting.round_has_bet) {
+) {
+    if (state.betting.highest_commitment() == 0) {
         return false;
     }
-
     if (!state.either_player_all_in()) {
         return false;
     }
-
     return state.betting.commitments_matched();
 }
 
@@ -530,7 +494,7 @@ int BettingEngine::resolve_raise_to_amount(
 
 int BettingEngine::actor_stack(
     const PublicState& state
-) const {
+) {
     return state.stack(state.player_to_act);
 }
 
@@ -554,7 +518,7 @@ int BettingEngine::opponent_committed(
 
 int BettingEngine::amount_to_call(
     const PublicState& state
-) const {
+) {
     return state.betting.amount_to_call(state.player_to_act);
 }
 
@@ -566,16 +530,8 @@ int BettingEngine::actor_total_stack_available_this_street(
 
 int BettingEngine::min_legal_raise_to(
     const PublicState& state
-) const {
-    if (!state.betting.round_has_bet) {
-        throw std::invalid_argument(
-            "min_legal_raise_to requires an existing bet."
-        );
-    }
-
-    const int last_raise =
-        std::max(1, state.betting.last_raise_size);
-
+) {
+    const int last_raise = std::max(1, state.betting.amount_to_call(state.player_to_act));
     return state.betting.current_bet_to_call + last_raise;
 }
 
@@ -606,27 +562,21 @@ bool BettingEngine::can_raise(
 
 bool BettingEngine::is_unopened_pot(
     const PublicState& state
-) const {
+) {
     return state.betting.unopened() &&
            state.betting.amount_to_call(state.player_to_act) == 0;
 }
 
 bool BettingEngine::is_facing_bet(
     const PublicState& state
-) const {
+) {
     return state.betting.player_is_facing_bet(state.player_to_act);
-}
-
-Player BettingEngine::opponent_of(
-    Player player
-) const {
-    return poker::opponent_of(player);
 }
 
 int BettingEngine::round_to_chip_unit(
     int amount,
     int chip_unit
-) const {
+) {
     if (chip_unit <= 0) {
         throw std::invalid_argument("chip_unit must be positive.");
     }
@@ -680,30 +630,21 @@ void BettingEngine::commit_chips(
 
 void BettingEngine::switch_player_to_act(
     PublicState& state
-) const {
+) {
     state.player_to_act = opponent_of(state.player_to_act);
-}
-
-void BettingEngine::append_action_history(
-    PublicState& state,
-    const Action& action
-) const {
-    state.action_history.push_back(action);
-    ++state.betting.actions_this_street;
 }
 
 void BettingEngine::validate_action_basic(
     const PublicState& state,
     const Action& action
-) const {
-    if (state.terminal) {
+) {
+    if (state.is_terminal()) {
         throw std::invalid_argument(
             "Cannot apply an action to a terminal state."
         );
     }
 
-    if (state.player_to_act != Player::P0 &&
-        state.player_to_act != Player::P1) {
+    if (state.player_to_act != Player::P0 && state.player_to_act != Player::P1) {
         throw std::invalid_argument(
             "Action requires P0 or P1 to act."
         );
@@ -717,9 +658,7 @@ void BettingEngine::validate_action_basic(
         );
     }
 
-    if (action.type == ActionType::Fold ||
-        action.type == ActionType::Call ||
-        action.type == ActionType::Raise) {
+    if (action.type == ActionType::Fold || action.type == ActionType::Call || action.type == ActionType::Raise) {
         if (!is_facing_bet(state)) {
             throw std::invalid_argument(
                 "Fold, Call, and Raise require facing a bet."

@@ -45,7 +45,7 @@ struct HoleCards {
         }
     }
 
-    DeckMask mask() const {
+    [[nodiscard]] DeckMask mask() const {
         DeckMask result = empty_deck_mask();
         result = add_card(result, a);
         result = add_card(result, b);

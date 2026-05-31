@@ -1,789 +1,625 @@
-#include "holdem/subgame_builder.hpp"
+// subgame_builder.cpp
+//
+// Public-tree Hold'em subgame builder.
+//
+// This version intentionally does NOT build:
+//
+//   root chance -> exact P0/P1 private hand pair -> full duplicated subtree
+//
+// Instead it builds:
+//
+//   public action/chance/terminal tree
+//   + HandDomain for each player
+//   + one HandPairTable
+//   + ActionState tensor metadata per public decision node
+//
+// Private hands are not tree branches.
 
-#include <cmath>
+#include "holdem/subgame_builder.hpp"
+#include "holdem/terminal_utility.hpp"
+#include "holdem/action.hpp"
+#include "holdem/board_abstraction.hpp"
+#include "holdem/betting_engine.hpp"
+#include "holdem/public_state.hpp"
+#include "holdem/subgame_config.hpp"
+
+#include "game.hpp"
+
+#include "poker/board.hpp"
+#include "poker/deck_mask.hpp"
+#include "poker/hand.hpp"
+#include "poker/range.hpp"
+
+#include <algorithm>
 #include <stdexcept>
-#include <string>
 #include <utility>
 #include <vector>
 
-#include "holdem/terminal_utility.hpp"
-
 namespace poker::holdem {
 namespace {
-    GameAction to_game_action(const Action& action) {
-        return GameAction{
-            static_cast<int>(action.type),
-            action.amount,
-            action_history_token(action)
-        };
+GameAction to_game_action(const Action& action) {
+    return GameAction{
+        static_cast<int>(action.type),
+        action.amount
+    };
+}
+
+// Cases:
+//   start river:
+//     every node uses -1
+//   start turn:
+//     river node stores raw river card id
+//   start flop:
+//     flop/root nodes store -1
+//     turn nodes store raw turn card id
+//     river nodes store turn_card * 52 + river_card
+int encode_relative_board_index(
+    const Board& start_board,
+    const Board& board
+) {
+    if (board.size() < start_board.size()) {
+        throw std::invalid_argument(
+            "Board cannot be smaller than start_board."
+        );
     }
-
-    GameAction private_deal_game_action(
-        const PrivateState& private_state
-    ) {
-        return GameAction{
-            0,
-            0,
-            "private_deal:" + poker::holdem::to_string(private_state)
-        };
+    if (board.size() == start_board.size()) {
+        return -1;
     }
-
-    GameAction public_board_game_action(
-        const Board& board
-    ) {
-        return GameAction{
-            0,
-            0,
-            "deal_board:" + poker::to_string(board)
-        };
-    }
-
-    GameAction synthetic_action_label(const std::string& label) {
-        return GameAction{0, 0, label};
-    }
-
-    std::vector<GameAction> to_game_actions(
-        const std::vector<Action>& actions
-    ) {
-        std::vector<GameAction> result;
-        result.reserve(actions.size());
-
-        for (const Action& action : actions) {
-            result.push_back(to_game_action(action));
-        }
-
-        return result;
-    }
-
-    PublicState clear_terminal_all_in_marker(PublicState state) {
-        if (state.terminal_reason != TerminalReason::AllInCalled) {
+    for (int i = 0; i < start_board.size(); ++i) {
+        if (board.cards[static_cast<std::size_t>(i)] !=
+            start_board.cards[static_cast<std::size_t>(i)]) {
             throw std::invalid_argument(
-                "Expected AllInCalled state."
+                "Board does not extend start_board prefix."
             );
         }
-
-        state.terminal = false;
-        state.terminal_reason = TerminalReason::None;
-        state.player_to_act = Player::P0;
-        state.folded_player = Player::Terminal;
-        state.winner = Player::Terminal;
-
-        return state;
     }
-
-    int add_node_and_link(
-        poker::BuildContext& ctx,
-        int parent_id,
-        poker::Node node
-    ) {
-        node.parent = parent_id;
-
-        const int node_id = ctx.add_node(node);
-
-        if (parent_id >= 0) {
-            ctx.add_child(parent_id, node_id);
+    if (start_board.size() == 4) {
+        if (board.size() != 5) {
+            throw std::invalid_argument(
+                "Turn-start subgame can only encode river extension."
+            );
         }
+        return board.cards[4];
+    }
+    if (start_board.size() == 3) {
+        if (board.size() == 4) {
+            return board.cards[3];
+        }
+        if (board.size() == 5) {
+            const int turn_card = board.cards[3];
+            const int river_card = board.cards[4];
 
-        return node_id;
+            return turn_card * kNumCards + river_card;
+        }
+        throw std::invalid_argument(
+            "Flop-start subgame can only encode turn/river extensions."
+        );
+    }
+    if (start_board.size() == 5) {
+        if (board.size() != 5) {
+            throw std::invalid_argument(
+                "River-start subgame cannot encode extra public cards."
+            );
+        }
+        return -1;
+    }
+    throw std::invalid_argument(
+        "Unsupported start board size for board_index encoding."
+    );
+}
+
+PublicNode make_node_from_public_state(
+    const PublicState& state,
+    const PublicNodeType type,
+    const Player player
+) {
+    PublicNode node;
+
+    node.parent = -1;
+    node.depth = 0;
+    node.type = type;
+    node.player = player;
+    node.first_edge = 0;
+    node.edge_count = 0;
+    node.action_state_index = -1;
+    return node;
+}
+
+bool should_go_to_showdown_after_betting_round(
+    const BettingEngine& betting_engine,
+    const PublicState& state
+) {
+    if (state.is_terminal()) {
+        return false;
+    }
+    return state.board.is_river() && poker::holdem::BettingEngine::betting_round_closed(state);
+}
+
+bool needs_public_chance_after_betting_round(
+    const BettingEngine& betting_engine,
+    const PublicState& state
+) {
+    if (state.is_terminal()) {
+        return false;
+    }
+    if (state.board.is_river()) {
+        return false;
+    }
+    return poker::holdem::BettingEngine::betting_round_closed(state);
+}
+
+bool is_all_in_runout_state(const PublicState& state) {
+    if (state.is_terminal()) {
+        return false;
+    }
+    return state.either_player_all_in() && state.both_players_have_matched_current_bet();
 }
 
 } // namespace
 
-    InfoSetKey HoldemSubgameBuilder::make_key(
-        Player player,
-        const PublicState& public_state,
-        const PrivateState& private_state
-    ) const {
-        return make_infoset_key(
-            player,
-            public_state,
-            private_state,
-            *config_.hand_abstraction,
-            config_.board_abstraction.get()
+// -----------------------------------------------------------------------------
+// Construction
+// -----------------------------------------------------------------------------
+
+HoldemSubgameBuilder::HoldemSubgameBuilder(HoldemSubgameConfig  config)
+    : config_(std::move(config)),
+      betting_engine_{},
+      all_in_equity_cache_() {
+    if (!config_.board_abstraction) {
+        throw std::invalid_argument(
+            "HoldemSubgameBuilder requires board_abstraction."
         );
     }
-    HoldemSubgameBuilder::HoldemSubgameBuilder(
-        HoldemSubgameConfig config
-    )
-        : config_(std::move(config)),
-          betting_engine_{},
-          chance_model_(config_.board_abstraction) {}
-
-
-    Game HoldemSubgameBuilder::build() const {
-        validate_config();
-        if (config_.collapse_all_in_runouts_to_ev) {
-            all_in_equity_cache_.initialize_for_subgame(
-                config_.board,
-                config_.start_street,
-                config_.p0_range,
-                config_.p1_range
-            );
-        }
-        HoldemBuildContext ctx;
-        const PublicState initial_public = config_.initial_public_state();
-        const int root_id = add_root_chance_node(ctx);
-
-        add_private_deal_children(
-            ctx,
-            root_id,
-            initial_public
+    if (!config_.hand_abstraction) {
+        throw std::invalid_argument(
+            "HoldemSubgameBuilder requires hand_abstraction."
         );
+    }
+}
 
-        if (config_.validate_tree_during_build) {
-            validate_built_game(ctx.game);
+Game HoldemSubgameBuilder::build() const {
+    Game game;
+    game.num_players = 2;
+    const PublicState root_state = config_.initial_public_state();
+    initialize_hand_data(game, root_state.board);
+    all_in_equity_cache_ = std::make_unique<AllInEquityCache>();
+    all_in_equity_cache_->initialize_for_subgame(root_state.board, config_.p0_range, config_.p1_range);
+    const PublicNode root_node = make_node_from_public_state(
+        root_state,
+        PublicNodeType::Action,
+        root_state.player_to_act
+    );
+    const int root_id = game.add_node(root_node);
+    game.root = root_id;
+    expand_public_state(game, root_id, root_state);
+    game.terminal_index_by_node.clear();
+    game.terminal_nodes.clear();
+    return game;
+}
+
+void HoldemSubgameBuilder::validate_config() const {
+    config_.validate();
+    if (!config_.board_abstraction) {
+        throw std::invalid_argument(
+            "HoldemSubgameConfig board_abstraction is null."
+        );
+    }
+    if (!config_.hand_abstraction) {
+        throw std::invalid_argument(
+            "HoldemSubgameConfig hand_abstraction is null."
+        );
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Hand domains / legal pairs
+// -----------------------------------------------------------------------------
+    Player HoldemSubgameBuilder::first_player_to_act_on_next_street() const {
+        switch (config_.first_to_act_rule) {
+            case FirstToActRule::OopActsFirst:
+                return config_.oop_player;
+
+            case FirstToActRule::P0ActsFirst:
+                return Player::P0;
+
+            case FirstToActRule::P1ActsFirst:
+                return Player::P1;
         }
 
-        return std::move(ctx.game);
+        throw std::logic_error("Unknown FirstToActRule.");
     }
-    int HoldemSubgameBuilder::add_root_chance_node(
-        BuildContext& ctx
-    ) {
-        Node root;
+    void HoldemSubgameBuilder::initialize_hand_data(Game& game,const Board &starting_board) const {
+    HandDomain p0 = build_hand_domain(config_.p0_range, starting_board);
+    HandDomain p1 = build_hand_domain(config_.p1_range, starting_board);
+    HandPairTable pairs = build_hand_pair_table(p0, p1);
+    game.set_hand_domains(
+        std::move(p0),
+        std::move(p1),
+        std::move(pairs)
+    );
+}
 
-        root.parent = -1;
-        root.player = Player::Chance;
-        root.infoset = -1;
-        root.incoming_action = chance_deal_action();
-        root.chance_prob = 0.0f;
-        root.terminal = false;
-        root.utility_p0 = 0.0f;
-
-        const int root_id = ctx.add_node(root);
-
-        ctx.game.root = root_id;
-        ctx.game.num_players = 2;
-
-        return root_id;
+HandDomain HoldemSubgameBuilder::build_hand_domain(
+    const Range& range,
+    const Board &starting_board
+) {
+    const DeckMask dead = board_mask(starting_board);
+    HandDomain domain;
+    domain.hands = range.legal_hands(dead);
+    if (domain.hands.empty()) {
+        throw std::invalid_argument(
+            "Range has no legal hands after board blockers."
+        );
     }
 
-    void HoldemSubgameBuilder::add_private_deal_children(
-        HoldemBuildContext& ctx,
-        int root_id,
-        const PublicState& initial_public_state
-    ) const {
-        const std::vector<PrivateDealOutcome> deals = chance_model_.private_deal_outcomes(config_);
+    return domain;
+}
 
-        for (const PrivateDealOutcome& deal : deals) {
-            Node child;
+HandPairTable HoldemSubgameBuilder::build_hand_pair_table(
+    const HandDomain& p0,
+    const HandDomain& p1
+) {
+    if (p0.empty() || p1.empty()) {
+        throw std::invalid_argument(
+            "Cannot build HandPairTable from empty HandDomain."
+        );
+    }
+    HandPairTable table;
+    for (int i = 0; i < p0.hand_count(); ++i) {
+        const HandId p0_hand = p0.hands[static_cast<std::size_t>(i)];
+        const HoleCards p0_cards = hand_from_id(p0_hand);
 
-            child.player = initial_public_state.player_to_act;
-            child.infoset = -1;
-            child.incoming_action = private_deal_game_action(deal.private_state);
-            child.chance_prob = deal.probability;
-            child.terminal = false;
-            child.utility_p0 = 0.0f;
+        for (int j = 0; j < p1.hand_count(); ++j) {
+            const HandId p1_hand = p1.hands[static_cast<std::size_t>(j)];
+            const HoleCards p1_cards = hand_from_id(p1_hand);
 
-            const int child_id = add_node_and_link(ctx, root_id, child);
+            if (hands_overlap(p0_cards, p1_cards)) {
+                continue;
+            }
 
-            expand_state(
-                ctx,
-                child_id,
-                initial_public_state,
-                deal.private_state
+            table.p0_index.push_back(i);
+            table.p1_index.push_back(j);
+        }
+    }
+
+    if (table.empty()) {
+        throw std::invalid_argument(
+            "No legal non-overlapping hand pairs in subgame ranges."
+        );
+    }
+
+    return table;
+}
+
+// -----------------------------------------------------------------------------
+// Recursive public-tree expansion
+// -----------------------------------------------------------------------------
+
+void HoldemSubgameBuilder::expand_public_state(
+    Game& game,
+    const int node_id,
+    const PublicState& state
+) const {
+    PublicNode& node = game.node(node_id);
+    if (state.is_terminal()) {
+        finalize_terminal_node(game, node_id, state);
+        return;
+    }
+    if (node.type == PublicNodeType::Chance) {
+        expand_public_chance_node(game, node_id, state);
+        return;
+    }
+    if (node.type != PublicNodeType::Action) {
+        throw std::logic_error(
+            "Nonterminal public state must correspond to Action or Chance node."
+        );
+    }
+    expand_action_node(game, node_id, state);
+}
+
+void HoldemSubgameBuilder::finalize_terminal_node(
+    Game& game,
+    const int node_id,
+    const PublicState& state
+) const {
+    PublicNode& node = game.node(node_id);
+
+    node.type = PublicNodeType::Terminal;
+    node.player = Player::Terminal;
+    if (game.terminal_index_by_node.size() <= node_id) {
+        game.terminal_index_by_node.resize(node_id + 1,-1);
+    }
+    if (game.terminal_index_by_node[node_id] != -1) {
+        throw std::logic_error(
+            "Terminal value row already exists for node."
+        );
+    }
+    const int terminal_index = static_cast<int>(game.terminal_nodes.size());
+    game.terminal_nodes.push_back(node_id);
+    game.terminal_index_by_node[node_id] = terminal_index;
+    const std::size_t old_size = game.terminal_value_p0.size();
+    const int hand_pair_count = game.hand_pairs.pair_count();
+    game.terminal_value_p0.resize(old_size + static_cast<std::size_t>(hand_pair_count),0.0f);
+    for (int pair_id = 0; pair_id < hand_pair_count; ++pair_id) {
+        const float value = terminal_value_for_pair(game,state,pair_id);
+        if (!std::isfinite(value)) {
+            throw std::runtime_error(
+                "Computed non-finite terminal value."
             );
         }
+        game.terminal_value_p0[old_size + pair_id] = value;
     }
+}
 
-    void HoldemSubgameBuilder::expand_state(
-        HoldemBuildContext& ctx,
-        int node_id,
-        const PublicState& public_state,
-        const PrivateState& private_state
-    ) const {
-        public_state.validate();
-        private_state.validate();
+float HoldemSubgameBuilder::terminal_value_for_pair(
+    const Game& game,
+    const PublicState& terminal_state,
+    const int hand_pair_id
+) const {
+    if (hand_pair_id < 0 || hand_pair_id >= game.hand_pairs.pair_count()) {
+        throw std::invalid_argument(
+            "hand_pair_id is out of range."
+        );
+    }
+    const int p0_domain_index = game.hand_pairs.p0_index.at(hand_pair_id);
+    const int p1_domain_index = game.hand_pairs.p1_index.at(hand_pair_id);
+    const HandId p0_hand_id = game.p0_hands.hands.at(p0_domain_index);
+    const HandId p1_hand_id = game.p1_hands.hands.at(p1_domain_index);
+    const PrivateState private_state{hand_from_id(p0_hand_id),hand_from_id(p1_hand_id)};
+    // Exact public runouts may collide with a root hand pair.
+    // That public/private combination is impossible.
+    if (private_state.overlaps_mask(board_mask(terminal_state.board))) {
+        return 0.0f;
+    }
+    return terminal_utility_p0(terminal_state, private_state, all_in_equity_cache_.get());
+}
+void HoldemSubgameBuilder::expand_action_node(
+    Game& game,
+    int node_id,
+    const PublicState& state
+) const {
+    PublicNode& node = game.node(node_id);
 
-        if (public_state.terminal) {
-            return;
-        }
+    node.type = PublicNodeType::Action;
+    node.player = state.player_to_act;
+    const std::vector<Action> legal_actions =
+        betting_engine_.legal_actions(
+            state,
+            config_.betting_abstraction
+        );
+    if (legal_actions.empty()) {
+        throw std::logic_error(
+            "Action node has no legal actions."
+        );
+    }
+    struct PendingChild {
+        int child_id = -1;
+        int action_id = -1;
+        PublicState child_state;
+    };
+    std::vector<PendingChild> pending;
+    pending.reserve(legal_actions.size());
 
-        if (betting_engine_.betting_round_closed(public_state)) {
-            if (should_go_to_showdown_after_betting_round(public_state)) {
-                PublicState showdown = make_showdown_state(public_state);
+    // Important:
+    //   Create all child nodes and attach all edges before recursively
+    //   expanding any child. This preserves contiguous edge ranges in Game.
+    for (const Action& action : legal_actions) {
+        PublicState next = betting_engine_.apply_action(state, action);
+        PublicState node_state = normalize_post_action_state(next);
 
-                add_terminal_node(
-                    ctx,
-                    node_id,
-                    synthetic_action_label("showdown"),
-                    showdown,
-                    private_state
-                );
+        const int child_id = add_node_for_state(game, node_id, node_state);
+        const int action_id = game.add_action(to_game_action(action));
 
-                return;
-            }
-
-            if (needs_public_chance_after_betting_round(public_state)) {
-                Node chance_node;
-
-                chance_node.player = Player::Chance;
-                chance_node.infoset = -1;
-                chance_node.incoming_action =
-                    synthetic_action_label("public_chance");
-                chance_node.chance_prob = 0.0f;
-                chance_node.terminal = false;
-                chance_node.utility_p0 = 0.0f;
-
-                const int chance_id =
-                    add_node_and_link(ctx, node_id, chance_node);
-
-                expand_public_chance_node(
-                    ctx,
-                    chance_id,
-                    public_state,
-                    private_state
-                );
-
-                return;
-            }
-        }
-
-        expand_decision_node(
-            ctx,
+        game.add_action_child(
             node_id,
-            public_state,
-            private_state
+            child_id,
+            action_id
         );
-    }
 
-    void HoldemSubgameBuilder::expand_decision_node(
-        HoldemBuildContext& ctx,
-        int node_id,
-        const PublicState& public_state,
-        const PrivateState& private_state
-    ) const {
-        const Player node_player = ctx.game.node(node_id).player;
-
-        if (node_player != Player::P0 && node_player != Player::P1) {
-            throw std::logic_error(
-                "expand_decision_node requires a real-player node."
-            );
-        }
-
-        if (public_state.player_to_act != node_player) {
-            throw std::logic_error(
-                "PublicState player_to_act does not match decision node player."
-            );
-        }
-
-        const std::vector<Action> legal_actions =
-            betting_engine_.legal_actions(
-                public_state,
-                config_.betting_abstraction
-            );
-
-        if (legal_actions.empty()) {
-            throw std::logic_error("Decision node has no legal actions.");
-        }
-
-        const int infoset_id =
-            get_or_create_infoset(
-                ctx,
-                public_state.player_to_act,
-                public_state,
-                private_state,
-                legal_actions
-            );
-
-        ctx.game.node(node_id).infoset = infoset_id;
-
-        for (const Action& action : legal_actions) {
-            PublicState next_public = betting_engine_.apply_action(public_state, action);
-
-            if (next_public.terminal && next_public.terminal_reason == TerminalReason::AllInCalled) {
-                if (config_.collapse_all_in_runouts_to_ev) {
-                    const float p0_equity = all_in_equity_cache_.p0_equity(next_public.board, next_public.street,private_state);
-                    const float utility_p0 = p0_equity * static_cast<float>(next_public.pot) - static_cast<float>(next_public.betting.p0_committed_this_round);
-                    add_terminal_node_with_utility(
-                        ctx,
-                        node_id,
-                        action,
-                        next_public,
-                        utility_p0
-                    );
-                    continue;
-                }
-
-                Node all_in_chance;
-
-                all_in_chance.player = Player::Chance;
-                all_in_chance.infoset = -1;
-                all_in_chance.incoming_action = to_game_action(action);
-                all_in_chance.chance_prob = 0.0f;
-                all_in_chance.terminal = false;
-                all_in_chance.utility_p0 = 0.0f;
-
-                const int all_in_chance_id = add_node_and_link(ctx, node_id, all_in_chance);
-
-                expand_all_in_called_state(
-                    ctx,
-                    all_in_chance_id,
-                    next_public,
-                    private_state
-                );
-
-                continue;
-            }
-
-            if (next_public.terminal) {
-                add_terminal_node(
-                    ctx,
-                    node_id,
-                    action,
-                    next_public,
-                    private_state
-                );
-
-                continue;
-            }
-
-            // IMPORTANT: handle closed nonterminal betting rounds here.
-            // River: action directly creates showdown terminal.
-            // Flop/turn: action creates a public-card chance node.
-            if (betting_engine_.betting_round_closed(next_public)) {
-                if (should_go_to_showdown_after_betting_round(next_public)) {
-                    PublicState showdown = make_showdown_state(next_public);
-
-                    add_terminal_node(
-                        ctx,
-                        node_id,
-                        action,
-                        showdown,
-                        private_state
-                    );
-
-                    continue;
-                }
-
-                if (needs_public_chance_after_betting_round(next_public)) {
-                    Node chance_node;
-
-                    chance_node.player = Player::Chance;
-                    chance_node.infoset = -1;
-                    chance_node.incoming_action = to_game_action(action);
-                    chance_node.chance_prob = 0.0f;
-                    chance_node.terminal = false;
-                    chance_node.utility_p0 = 0.0f;
-
-                    const int chance_id =
-                        add_node_and_link(ctx, node_id, chance_node);
-
-                    expand_public_chance_node(
-                        ctx,
-                        chance_id,
-                        next_public,
-                        private_state
-                    );
-
-                    continue;
-                }
-            }
-
-            Node child;
-
-            child.player = next_public.player_to_act;
-            child.infoset = -1;
-            child.incoming_action = to_game_action(action);
-            child.chance_prob = 0.0f;
-            child.terminal = false;
-            child.utility_p0 = 0.0f;
-
-            const int child_id =
-                add_node_and_link(ctx, node_id, child);
-
-            expand_state(
-                ctx,
+        pending.push_back(
+            PendingChild{
                 child_id,
-                next_public,
-                private_state
-            );
-        }
+                action_id,
+                std::move(node_state)
+            }
+        );
     }
 
-    void HoldemSubgameBuilder::expand_public_chance_node(
-        HoldemBuildContext& ctx,
-        int node_id,
-        const PublicState& public_state,
-        const PrivateState& private_state
-    ) const {
-        if (ctx.game.node(node_id).player != Player::Chance) {
-            throw std::logic_error(
-                "expand_public_chance_node requires a chance node."
+    game.register_action_state(
+        node_id,
+        state.player_to_act
+    );
+
+    for (const PendingChild& child : pending) {
+        expand_public_state(
+            game,
+            child.child_id,
+            child.child_state
+        );
+    }
+}
+
+void HoldemSubgameBuilder::expand_public_chance_node(
+    Game& game,
+    int node_id,
+    const PublicState& state
+) const {
+
+
+    if (state.board.is_river()) {
+        throw std::logic_error(
+            "River state cannot have public chance children."
+        );
+    }
+    PublicNode& node = game.node(node_id);
+    node.type = PublicNodeType::Chance;
+    node.player = Player::Chance;
+    const std::vector<BoardTransition> transitions =
+        config_.board_abstraction->next_board_transitions(
+            state.board,
+            board_mask(state.board)
+        );
+
+    if (transitions.empty()) {
+        throw std::logic_error(
+            "Public chance node has no board transitions."
+        );
+    }
+
+    struct PendingChanceChild {
+        int child_id = -1;
+        int public_card = -1;
+        float probability = 0.0f;
+        PublicState child_state;
+    };
+
+    std::vector<PendingChanceChild> pending;
+    pending.reserve(transitions.size());
+
+    for (const BoardTransition& transition : transitions) {
+        transition.board.validate();
+
+        if (transition.probability <= 0.0f ||
+            transition.probability > 1.0f ||
+            !std::isfinite(transition.probability)) {
+            throw std::invalid_argument(
+                "BoardTransition probability must be finite and in (0, 1]."
             );
         }
 
-        const Player next_to_act =
-            first_player_to_act_on_next_street(public_state);
-
-        const std::vector<PublicBoardOutcome> outcomes =
-            chance_model_.public_board_outcomes(
-                public_state,
-                private_state,
-                next_to_act
+        if (transition.board.size() != state.board.size() + 1) {
+            throw std::invalid_argument(
+                "Public chance transition must add exactly one card."
             );
+        }
 
-        for (const PublicBoardOutcome& outcome : outcomes) {
-            if (betting_engine_.betting_round_closed(outcome.public_state)) {
-                throw std::logic_error(
-                    "Public-card chance produced a next-street state whose betting "
-                    "round is already closed. Did you forget to reset BettingState "
-                    "when advancing streets?"
+        const phevaluator::Card dealt_card =
+            transition.board.cards.back();
+
+        PublicState next = make_next_street_public_state(
+            state,
+            transition.board,
+            first_player_to_act_on_next_street()
+        );
+
+        // There should not be any chance nodes in an all in runout state, it should be terminal to EV
+        if (is_all_in_runout_state(state)) {
+            if (config_.collapse_all_in_runouts_to_ev) {
+                throw std::invalid_argument(
+                "Chance Nodes should no longer occur after an All-In state with EV Collapse enabled."
                 );
             }
+            if (next.board.is_river()) {
+                next.make_showdown_terminal();
+            } else {
+                // Keep it nonterminal but all-in, so next expansion creates
+                // another chance node instead of an action node.
+                next.player_to_act = Player::P0;
+                next.validate();
+            }
+        }
 
-            Node child;
+        const int child_id = add_node_for_state(game, node_id, next);
 
-            child.player = outcome.public_state.player_to_act;
-            child.infoset = -1;
-            child.incoming_action =
-                public_board_game_action(outcome.public_state.board);
-            child.chance_prob = outcome.probability;
-            child.terminal = false;
-            child.utility_p0 = 0.0f;
+        game.add_chance_child(
+            node_id,
+            child_id,
+            static_cast<int>(dealt_card),
+            transition.probability
+        );
 
-            const int child_id =
-                add_node_and_link(ctx, node_id, child);
-
-            expand_state(
-                ctx,
+        pending.push_back(
+            PendingChanceChild{
                 child_id,
-                outcome.public_state,
-                private_state
-            );
-        }
-    }
-
-    void HoldemSubgameBuilder::expand_all_in_called_state(
-        HoldemBuildContext& ctx,
-        int node_id,
-        const PublicState& public_state,
-        const PrivateState& private_state
-    ) const {
-        if (!public_state.terminal ||
-            public_state.terminal_reason != TerminalReason::AllInCalled) {
-            throw std::logic_error(
-                "expand_all_in_called_state requires AllInCalled terminal marker."
-            );
-        }
-
-        if (ctx.game.node(node_id).player != Player::Chance) {
-            throw std::logic_error(
-                "All-in runout expansion must occur from a chance node."
-            );
-        }
-
-        if (public_state.street == Street::River) {
-            PublicState showdown = public_state;
-            showdown.terminal = true;
-            showdown.terminal_reason = TerminalReason::Showdown;
-            showdown.player_to_act = Player::Terminal;
-            showdown.folded_player = Player::Terminal;
-            showdown.winner = Player::Terminal;
-
-            add_terminal_node(
-                ctx,
-                node_id,
-                synthetic_action_label("all_in_showdown"),
-                showdown,
-                private_state
-            );
-
-            return;
-        }
-
-        PublicState runout_state = clear_terminal_all_in_marker(public_state);
-
-        const Player arbitrary_next_to_act = Player::P0;
-
-        const std::vector<PublicBoardOutcome> outcomes =
-            chance_model_.public_board_outcomes(
-                runout_state,
-                private_state,
-                arbitrary_next_to_act
-            );
-
-        for (const PublicBoardOutcome& outcome : outcomes) {
-            if (outcome.public_state.street == Street::River) {
-                PublicState showdown = outcome.public_state;
-                showdown.terminal = true;
-                showdown.terminal_reason = TerminalReason::Showdown;
-                showdown.player_to_act = Player::Terminal;
-                showdown.folded_player = Player::Terminal;
-                showdown.winner = Player::Terminal;
-
-                add_terminal_node(
-                    ctx,
-                    node_id,
-                    public_board_game_action(outcome.public_state.board),
-                    showdown,
-                    private_state,
-                    outcome.probability
-                );
-
-                continue;
+                static_cast<int>(dealt_card),
+                transition.probability,
+                std::move(next)
             }
-
-            PublicState next_all_in = outcome.public_state;
-            next_all_in.terminal = true;
-            next_all_in.terminal_reason = TerminalReason::AllInCalled;
-            next_all_in.player_to_act = Player::Terminal;
-            next_all_in.folded_player = Player::Terminal;
-            next_all_in.winner = Player::Terminal;
-
-            Node child_chance;
-
-            child_chance.player = Player::Chance;
-            child_chance.infoset = -1;
-            child_chance.incoming_action = public_board_game_action(outcome.public_state.board);
-            child_chance.chance_prob = outcome.probability;
-            child_chance.terminal = false;
-            child_chance.utility_p0 = 0.0f;
-
-            const int child_chance_id = add_node_and_link(ctx, node_id, child_chance);
-
-            expand_all_in_called_state(
-                ctx,
-                child_chance_id,
-                next_all_in,
-                private_state
-            );
-        }
-    }
-
-    int HoldemSubgameBuilder::add_chance_node(
-        HoldemBuildContext& ctx,
-        int parent_id,
-        const Action& incoming_action,
-        float chance_probability,
-        const PublicState& public_state,
-        const PrivateState& private_state
-    ) const {
-        Node node;
-
-        node.player = Player::Chance;
-        node.infoset = -1;
-        node.incoming_action = to_game_action(incoming_action);
-        node.chance_prob = chance_probability;
-        node.terminal = false;
-        node.utility_p0 = 0.0f;
-
-        (void)public_state;
-        (void)private_state;
-
-        return add_node_and_link(ctx, parent_id, node);
-    }
-
-    int HoldemSubgameBuilder::add_decision_node(
-        HoldemBuildContext& ctx,
-        int parent_id,
-        const Action& incoming_action,
-        const PublicState& public_state,
-        const PrivateState& private_state
-    ) const {
-        Node node;
-
-        node.player = public_state.player_to_act;
-        node.infoset = -1;
-        node.incoming_action = to_game_action(incoming_action);
-        node.chance_prob = 0.0f;
-        node.terminal = false;
-        node.utility_p0 = 0.0f;
-
-        (void)private_state;
-
-        return add_node_and_link(ctx, parent_id, node);
-    }
-
-    int HoldemSubgameBuilder::add_terminal_node(
-        HoldemBuildContext& ctx,
-        int parent_id,
-        const Action& incoming_action,
-        const PublicState& public_state,
-        const PrivateState& private_state
-    ) const {
-        return add_terminal_node(
-            ctx,
-            parent_id,
-            to_game_action(incoming_action),
-            public_state,
-            private_state
         );
     }
 
-    int HoldemSubgameBuilder::add_terminal_node(
-        HoldemBuildContext& ctx,
-        int parent_id,
-        const GameAction& incoming_action,
-        const PublicState& public_state,
-        const PrivateState& private_state
-    ) const {
-        const float utility =
-            terminal_utility_p0(
-                public_state,
-                private_state
-            );
-
-        return add_terminal_node_with_utility(
-            ctx,
-            parent_id,
-            incoming_action,
-            public_state,
-            utility
+    for (const PendingChanceChild& child : pending) {
+        expand_public_state(
+            game,
+            child.child_id,
+            child.child_state
         );
     }
+}
 
-    int HoldemSubgameBuilder::add_terminal_node(
-        HoldemBuildContext& ctx,
-        int parent_id,
-        const GameAction& incoming_action,
-        const PublicState& public_state,
-        const PrivateState& private_state,
-        float chance_probability
-    ) const {
-        const float utility =
-            terminal_utility_p0(
-                public_state,
-                private_state
-            );
+// -----------------------------------------------------------------------------
+// State normalization / node creation
+// -----------------------------------------------------------------------------
 
-        if (!public_state.terminal) {
-            throw std::invalid_argument(
-                "add_terminal_node requires terminal PublicState."
-            );
+PublicState HoldemSubgameBuilder::normalize_post_action_state(
+    PublicState state
+) const {
+    if (state.is_terminal()) {
+        if (state.terminal_type == TerminalType::P0_Fold || state.terminal_type == TerminalType::P1_Fold || state.terminal_type == TerminalType::Showdown) {
+            return state;
         }
-
-        Node node;
-
-        node.player = Player::Terminal;
-        node.infoset = -1;
-        node.incoming_action = incoming_action;
-        node.chance_prob = chance_probability;
-        node.terminal = true;
-        node.utility_p0 = utility;
-
-        return add_node_and_link(ctx, parent_id, node);
-    }
-
-    int HoldemSubgameBuilder::add_terminal_node_with_utility(
-        HoldemBuildContext& ctx,
-        int parent_id,
-        const Action& incoming_action,
-        const PublicState& public_state,
-        float utility_p0
-    ) const {
-        return add_terminal_node_with_utility(
-            ctx,
-            parent_id,
-            to_game_action(incoming_action),
-            public_state,
-            utility_p0
+        if (state.terminal_type == TerminalType::AllIn) {
+            if (config_.collapse_all_in_runouts_to_ev) {
+                return state;
+            }
+            if (state.board.is_river()) {
+                state.make_showdown_terminal();
+                return state;
+            }
+            state.clear_all_in_terminal_for_runout();
+            return state;
+        }
+        throw std::logic_error(
+            "Unknown terminal reason after action."
         );
     }
-
-    int HoldemSubgameBuilder::add_terminal_node_with_utility(
-        HoldemBuildContext& ctx,
-        int parent_id,
-        const GameAction& incoming_action,
-        const PublicState& public_state,
-        float utility_p0
-    ) const {
-        if (!public_state.terminal) {
-            throw std::invalid_argument(
-                "add_terminal_node_with_utility requires terminal PublicState."
-            );
-        }
-
-        Node node;
-
-        node.player = Player::Terminal;
-        node.infoset = -1;
-        node.incoming_action = incoming_action;
-        node.chance_prob = 0.0f;
-        node.terminal = true;
-        node.utility_p0 = utility_p0;
-
-        return add_node_and_link(ctx, parent_id, node);
+    if (should_go_to_showdown_after_betting_round(betting_engine_,state)) {
+        state.make_showdown_terminal();
+        return state;
     }
-
-    int HoldemSubgameBuilder::get_or_create_infoset(
-        HoldemBuildContext& ctx,
-        Player player,
-        const PublicState& public_state,
-        const PrivateState& private_state,
-        const std::vector<Action>& legal_actions
-    ) const {
-        const InfoSetKey key =
-            make_key(
-                player,
-                public_state,
-                private_state
-            );
-
-        const std::string serialized_key =
-            to_string(key);
-
-        const std::vector<GameAction> actions =
-            to_game_actions(legal_actions);
-
-        return ctx.get_or_create_infoset(
-            player,
-            serialized_key,
-            actions
-        );
-    }
-    bool HoldemSubgameBuilder::needs_public_chance_after_betting_round(
-        const PublicState& public_state
-    ) const {
-        return !public_state.terminal &&
-               public_state.street != Street::River;
-    }
-
-    bool HoldemSubgameBuilder::should_go_to_showdown_after_betting_round(
-        const PublicState& public_state
-    ) const {
-        return !public_state.terminal &&
-               public_state.street == Street::River;
-    }
-
-    Player HoldemSubgameBuilder::first_player_to_act_on_next_street(
-        const PublicState& /*public_state*/
-    ) const {
-        // For now, assume P0 is the out-of-position player and acts first
-        // on every postflop street.
-        //
-        // Later, make this explicit:
-        //   config_.out_of_position_player
-        return Player::P0;
-    }
-
-    PublicState HoldemSubgameBuilder::make_showdown_state(
-        PublicState state
-    ) const {
-        if (state.street != Street::River) {
-            throw std::invalid_argument(
-                "Showdown state can only be created on river."
-            );
-        }
-
-        state.terminal = true;
-        state.terminal_reason = TerminalReason::Showdown;
-        state.player_to_act = Player::Terminal;
-        state.folded_player = Player::Terminal;
-        state.winner = Player::Terminal;
-
-        state.validate();
-
+    // Non-river closed betting round becomes a chance node.
+    if (needs_public_chance_after_betting_round(betting_engine_, state)) {
         return state;
     }
 
-    void HoldemSubgameBuilder::validate_config() const {
-        config_.validate();
-    }
+    return state;
+}
 
-    void HoldemSubgameBuilder::validate_built_game(
-        const Game& game
-    ) const {
-        validate_game_basic_shape(game);
-    }
+int HoldemSubgameBuilder::add_node_for_state(
+    Game& game,
+    int parent_id,
+    const PublicState& state
+) const {
 
+    auto type = PublicNodeType::Action;
+    Player player;
+    if (state.is_terminal()) {
+        type = PublicNodeType::Terminal;
+        player = Player::Terminal;
+    } else if (is_all_in_runout_state(state)) {
+        if (!state.board.is_river() && !config_.collapse_all_in_runouts_to_ev) {
+            type = PublicNodeType::Chance;
+            player = Player::Chance;
+        } else {
+            type = PublicNodeType::Terminal;
+            player = Player::Terminal;
+        }
+    } else if (needs_public_chance_after_betting_round(
+                   betting_engine_,
+                   state
+               )) {
+        type = PublicNodeType::Chance;
+        player = Player::Chance;
+    } else {
+        type = PublicNodeType::Action;
+        player = state.player_to_act;
+    }
+    PublicNode node = make_node_from_public_state(
+        state,
+        type,
+        player
+    );
+    node.parent = parent_id;
+    return game.add_node(node);
+}
 } // namespace poker::holdem

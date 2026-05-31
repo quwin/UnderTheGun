@@ -1,7 +1,6 @@
 #pragma once
 
 #include "holdem/private_state.hpp"
-#include "holdem/street.hpp"
 
 #include "poker/board.hpp"
 #include "poker/deck_mask.hpp"
@@ -23,21 +22,11 @@ public:
 
     void initialize_for_subgame(
         const Board& start_board,
-        Street start_street,
         const Range& p0_range,
         const Range& p1_range
     ) {
         start_board.validate();
-        validate_street(start_street);
-
-        if (!board_size_matches_street(start_street, start_board.size())) {
-            throw std::invalid_argument(
-                "AllInEquityCache board size does not match start street."
-            );
-        }
-
         start_board_ = start_board;
-        start_street_ = start_street;
         initialized_ = true;
 
         p0_index_.fill(-1);
@@ -69,7 +58,6 @@ public:
 
     float p0_equity(
         const Board& board,
-        Street street,
         const PrivateState& private_state
     ) {
         ensure_initialized();
@@ -77,25 +65,17 @@ public:
         board.validate();
         private_state.validate();
 
-        if (!board_size_matches_street(street, board.size())) {
-            throw std::invalid_argument(
-                "AllInEquityCache::p0_equity board size does not match street."
-            );
-        }
-
         const HandId p0 = make_hand(private_state.p0_hand);
         const HandId p1 = make_hand(private_state.p1_hand);
 
-        if (street == Street::Flop) {
+        if (board.is_flop()) {
             return flop_equity(p0, p1, board, private_state);
         }
-
-        if (street == Street::Turn) {
+        if (board.is_turn()) {
             const phevaluator::Card turn_card = turn_card_from_board(board);
             return turn_equity(p0, p1, board, turn_card, private_state);
         }
-
-        if (street == Street::River) {
+        if (board.is_river()) {
             return river_equity(board, private_state);
         }
 
@@ -114,8 +94,6 @@ private:
     bool initialized_ = false;
 
     Board start_board_;
-    Street start_street_ = Street::River;
-
     std::vector<HandId> p0_hands_;
     std::vector<HandId> p1_hands_;
 
@@ -136,7 +114,7 @@ private:
         }
     }
 
-    int pair_index(HandId p0, HandId p1) const {
+    [[nodiscard]] int pair_index(const HandId p0, const HandId p1) const {
         validate_hand_id(p0);
         validate_hand_id(p1);
 
@@ -184,7 +162,7 @@ private:
         const int idx = pair_index(p0, p1);
 
         if (!flop_computed_[idx]) {
-            flop_equity_[idx] = compute_exact_equity(board, Street::Flop, private_state);
+            flop_equity_[idx] = compute_exact_equity(board, private_state);
             flop_computed_[idx] = 1;
         }
         return flop_equity_[idx];
@@ -204,7 +182,7 @@ private:
         const int idx = pair_index(p0, p1);
         TurnCardCache& cache = turn_cache_[turn_card];
         if (!cache.computed[idx]) {
-            cache.equity[idx] = compute_exact_equity(board, Street::Turn, private_state);
+            cache.equity[idx] = compute_exact_equity(board, private_state);
             cache.computed[idx] = 1;
         }
         return cache.equity[idx];
@@ -247,7 +225,6 @@ private:
 
     static float compute_exact_equity(
         const Board& board,
-        const Street street,
         const PrivateState& private_state
     ) {
         board.validate();
@@ -267,7 +244,7 @@ private:
         double score = 0.0;
         int total = 0;
 
-        if (street == Street::Turn) {
+        if (board.is_turn()) {
             for (phevaluator::Card river : remaining) {
                 Board river_board = board.with_added_card(river);
                 const phevaluator::Rank p0_rank = phevaluator::EvaluateCards(
@@ -296,7 +273,7 @@ private:
                 }
                 ++total;
             }
-        } else if (street == Street::Flop) {
+        } else if (board.is_flop()) {
             for (std::size_t i = 0; i < remaining.size(); ++i) {
                 for (std::size_t j = i + 1; j < remaining.size(); ++j) {
                     Board river_board = board;

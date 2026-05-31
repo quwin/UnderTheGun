@@ -2,8 +2,6 @@
 
 #include "game.hpp"
 
-#include "street.hpp"
-
 #include "poker/board.hpp"
 #include "poker/hand.hpp"
 #include "../../external/PokerHandEvaluator/cpp/include/phevaluator/phevaluator.h"
@@ -57,28 +55,21 @@ public:
     virtual HandBucketId bucket_for(
         Player player,
         const HoleCards& private_hand,
-        const Board& board,
-        Street street
+        const Board& board
     ) const = 0;
 
     virtual HandBucketId bucket_for(
         Player player,
         HandId private_hand,
-        const Board& board,
-        Street street
+        const Board& board
     ) const {
         return bucket_for(
             player,
             hand_from_id(private_hand),
-            board,
-            street
+            board
         );
     }
-
     virtual bool is_exact() const = 0;
-
-    // Useful for sizing/debugging. Exact abstraction returns kNumHands.
-    virtual int num_buckets(Street street) const = 0;
 };
 
 // -----------------------------------------------------------------------------
@@ -93,25 +84,15 @@ public:
     HandBucketId bucket_for(
         Player player,
         const HoleCards& private_hand,
-        const Board& board,
-        Street street
+        const Board& board
     ) const override {
         if (player != Player::P0 && player != Player::P1) {
             throw std::invalid_argument(
                 "ExactHandAbstraction requires P0 or P1."
             );
         }
-
-        validate_street(street);
         board.validate();
         private_hand.validate();
-
-        if (!board_size_matches_street(street, board.size())) {
-            throw std::invalid_argument(
-                "Board size does not match street."
-            );
-        }
-
         if (hand_overlaps_mask(private_hand, board_mask(board))) {
             throw std::invalid_argument(
                 "Private hand overlaps public board."
@@ -123,10 +104,6 @@ public:
 
     bool is_exact() const override {
         return true;
-    }
-
-    int num_buckets(Street /*street*/) const override {
-        return kNumHands;
     }
 };
 
@@ -177,17 +154,11 @@ public:
     [[nodiscard]] HandBucketId bucket_for(
         Player player,
         const HoleCards& private_hand,
-        const Board& board,
-        Street street
+        const Board& board
     ) const override {
         if (player != Player::P0 && player != Player::P1) {
             throw std::invalid_argument(
                 "RiverStrengthHandAbstraction requires P0 or P1."
-            );
-        }
-        if (street != Street::River) {
-            throw std::invalid_argument(
-                "RiverStrengthHandAbstraction only supports river boards."
             );
         }
         board.validate();
@@ -215,15 +186,6 @@ public:
 
         return bucket_id_from_rank(hand_rank);
     }
-    int num_buckets(Street street) const override {
-        if (street != Street::River) {
-            throw std::invalid_argument(
-                "RiverStrengthHandAbstraction only supports river."
-            );
-        }
-
-        return 9;
-    }
 };
 
 // -----------------------------------------------------------------------------
@@ -238,8 +200,7 @@ public:
     [[nodiscard]] HandBucketId bucket_for(
         Player player,
         const HoleCards& private_hand,
-        const Board& board,
-        Street street
+        const Board& board
     ) const override {
         if (player != Player::P0 && player != Player::P1) {
             throw std::invalid_argument(
@@ -247,41 +208,15 @@ public:
             );
         }
 
-        validate_street(street);
         board.validate();
         private_hand.validate();
-
-        if (!board_size_matches_street(street, board.size())) {
-            throw std::invalid_argument(
-                "Board size does not match street."
-            );
-        }
-
         if (hand_overlaps_mask(private_hand, board_mask(board))) {
             throw std::invalid_argument(
                 "Private hand overlaps public board."
             );
         }
 
-        switch (street) {
-            case Street::Preflop:
-                return 0;
-
-            case Street::Flop:
-                return 1;
-
-            case Street::Turn:
-                return 2;
-
-            case Street::River:
-                return 3;
-        }
-
         return kInvalidHandBucket;
-    }
-
-    int num_buckets(Street /*street*/) const override {
-        return 4;
     }
 };
 

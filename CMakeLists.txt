@@ -109,7 +109,6 @@ endif()
 
 add_library(kuhn_gpu_cfr_lib
         include/game.hpp
-        include/kuhn_builder.hpp
         include/cfr_cpu.hpp
         include/exploitability.hpp
         include/gpu_state.hpp
@@ -120,22 +119,21 @@ add_library(kuhn_gpu_cfr_lib
         include/poker/hand.hpp
         include/poker/range.hpp
 
-        include/holdem/street.hpp
         include/holdem/action.hpp
-        include/holdem/betting_state.hpp
+        include/holdem/all_in_equity_cache.hpp
         include/holdem/betting_abstraction.hpp
         include/holdem/betting_engine.hpp
+        include/holdem/betting_state.hpp
+        include/holdem/board_abstraction.hpp
+        include/holdem/chance_model.hpp
+        include/holdem/hand_abstraction.hpp
+        include/holdem/infoset_key.hpp
         include/holdem/public_state.hpp
         include/holdem/private_state.hpp
-        include/holdem/chance_model.hpp
-        include/holdem/terminal_utility.hpp
-        include/holdem/infoset_key.hpp
-        include/holdem/hand_abstraction.hpp
-        include/holdem/board_abstraction.hpp
-        include/holdem/subgame_config.hpp
         include/holdem/subgame_builder.hpp
+        include/holdem/subgame_config.hpp
+        include/holdem/terminal_utility.hpp
 
-        src/kuhn_builder.cpp
         src/cfr_cpu.cpp
         src/exploitability.cpp
         src/cfr_gpu.cpp
@@ -145,7 +143,7 @@ add_library(kuhn_gpu_cfr_lib
 
         cuda/kernels.cu
         cuda/kernels.hpp
-        include/holdem/all_in_equity_cache.hpp
+        src/game.cpp
 )
 
 target_include_directories(kuhn_gpu_cfr_lib

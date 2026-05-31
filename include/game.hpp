@@ -1,620 +1,478 @@
 #pragma once
 
+#include "poker/board.hpp"
+#include "poker/hand.hpp"
+
 #include <cassert>
 #include <cstdint>
-#include <iostream>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
-#include <utility>
 #include <vector>
 
 namespace poker {
 
-// -----------------------------------------------------------------------------
-// Basic generic game enums
-// -----------------------------------------------------------------------------
-
-enum class Player : int {
+enum class Player : std::int8_t  {
     Chance   = -1,
     P0       = 0,
     P1       = 1,
     Terminal = 2
 };
-
-inline int to_index(Player player) {
-    if (player == Player::P0) {
-        return 0;
-    }
-
-    if (player == Player::P1) {
-        return 1;
-    }
-
-    throw std::invalid_argument("to_index requires P0 or P1.");
-}
-
-inline bool is_real_player(Player player) {
-    return player == Player::P0 || player == Player::P1;
-}
-
-inline bool is_chance(Player player) {
-    return player == Player::Chance;
-}
-
-inline bool is_terminal_player(Player player) {
-    return player == Player::Terminal;
-}
-
-inline Player opponent_of(Player player) {
-    if (player == Player::P0) {
-        return Player::P1;
-    }
-
-    if (player == Player::P1) {
-        return Player::P0;
-    }
-
-    throw std::invalid_argument("opponent_of requires P0 or P1.");
-}
-
 inline std::string to_string(Player player) {
     switch (player) {
         case Player::Chance:
             return "Chance";
-
         case Player::P0:
             return "P0";
-
         case Player::P1:
             return "P1";
-
         case Player::Terminal:
             return "Terminal";
     }
-
     return "Unknown";
 }
-
+enum class PublicNodeType : std::uint8_t {
+    Action   = 0,
+    Chance   = 1,
+    Terminal = 2
+};
+enum class TerminalType : std::uint8_t {
+    None     = 0,
+    P0_Fold     = 1,
+    P1_Fold     = 2,
+    Showdown = 3,
+    AllIn    = 4
+};
 // -----------------------------------------------------------------------------
-// Generic action representation
+// Action representation
 // -----------------------------------------------------------------------------
-//
-// This replaces the old Kuhn-only enum:
-//
-//   enum class Action { Deal, Check, Bet, Call, Fold };
-//
-// The generic CFR game only needs a stable action id plus optional metadata.
-// Hold'em-specific code can encode holdem::Action into this structure.
-//
-// Examples:
-//
-//   Kuhn check:
-//     action_type = 1
-//     amount = 0
-//     label = "check"
-//
-//   Hold'em bet 500:
-//     action_type = static_cast<int>(holdem::ActionType::Bet)
-//     amount = 500
-//     label = "bet:500"
-//
-//   Chance private deal:
-//     action_type = 0
-//     amount = 0
-//     label = "deal"
-
 struct GameAction {
     int action_type = 0;
     int amount = 0;
-    std::string label;
-
     GameAction() = default;
-
-    GameAction(
-        int type,
-        int action_amount,
-        std::string action_label
-    )
-        : action_type(type),
-          amount(action_amount),
-          label(std::move(action_label)) {}
+    GameAction(const int type, const int action_amount): action_type(type),amount(action_amount) {}
 };
-
 inline bool operator==(const GameAction& a, const GameAction& b) {
-    return a.action_type == b.action_type &&
-           a.amount == b.amount &&
-           a.label == b.label;
+    return a.action_type == b.action_type && a.amount == b.amount;
 }
-
 inline bool operator!=(const GameAction& a, const GameAction& b) {
     return !(a == b);
 }
-
 inline std::string to_string(const GameAction& action) {
-    if (!action.label.empty()) {
-        return action.label;
-    }
-
-    return "type=" + std::to_string(action.action_type) +
-           ":amount=" + std::to_string(action.amount);
+    return "type=" + std::to_string(action.action_type) + ":amount=" + std::to_string(action.amount);
 }
-
-inline GameAction chance_deal_action() {
-    return GameAction{0, 0, "deal"};
-}
-
 // -----------------------------------------------------------------------------
-// Generic game-tree node
+// Connection between two Nodes:
 // -----------------------------------------------------------------------------
+struct NodeEdge {
+    // Index of child
+    int child = -1;
+    // Used for action-node parents.
+    // This is the local action number at the parent action state.
+    // For chance-node parents, this should be -1.
+    int local_action = -1;
+    // Index into Game::actions.
+    // For chance edges, this may be -1 or a synthetic deal action.
+    int action_index = -1;
+    // Meaningful for public chance edges.
+    // Usually raw phevaluator::Card id.
+    // For action edges, this should be -1.
+    int public_card = -1;
+    // Action edges use 1.0.
+    // Chance edges use normalized transition probability.
+    float chance_prob = 1.0f;
+};
+// -----------------------------------------------------------------------------
+// Public node
+// -----------------------------------------------------------------------------
+//
+// A PublicNode represents only public information:
+//
+//   - acting player
+//   - board/street
+//   - pot/stack/commitment state
+//   - outgoing public actions/chance outcomes
+//
+// It deliberately does NOT contain:
+//
+//   - P0 private hand
+//   - P1 private hand
+//   - PrivateState
+//   - per-hand strategy vectors
+//   - per-hand regret vectors
+//
+// Hand-aware data lives in HandDomain, HandPairTable, and ActionState tensors.
 
-struct Node {
-    int id = -1;
+struct PublicNode {
     int parent = -1;
     int depth = 0;
-
+    PublicNodeType type = PublicNodeType::Terminal;
     Player player = Player::Terminal;
-
-    // Infoset id for real-player decision nodes.
-    //
-    // Use:
-    //   -1 for chance nodes
-    //   -1 for terminal nodes
-    int infoset = -1;
-
-    // Action taken from parent to reach this node.
-    //
-    // For root, this can be chance_deal_action() or ignored.
-    GameAction incoming_action = chance_deal_action();
-
-    // Chance probability from parent to this node.
-    //
-    // Meaningful only when parent.player == Player::Chance.
-    //
-    // For non-chance edges, use 0.0f or 1.0f. CFR traversal should look at the
-    // parent node's player to decide how to interpret the edge.
-    float chance_prob = 0.0f;
-
-    bool terminal = false;
-
-    // Utility from P0's perspective.
-    //
-    // Two-player zero-sum convention:
-    //
-    //   utility_p1 = -utility_p0
-    //
-    // Nonterminal nodes should have utility_p0 = 0.
-    float utility_p0 = 0.0f;
-
-    std::vector<int> children;
+    // Contiguous edge range in Game::edges.
+    int first_edge = 0;
+    int edge_count = 0;
+    int action_state_index = -1;
 };
 
 // -----------------------------------------------------------------------------
-// Information sets
+// Hand-aware side tables
+// Weights every possible hand in range equally
 // -----------------------------------------------------------------------------
+struct HandDomain {
+    // Exact legal private hands for this player after public board blockers.
+    std::vector<HandId> hands;
+    [[nodiscard]] int hand_count() const {
+        return static_cast<int>(hands.size());
+    }
+    [[nodiscard]] bool empty() const {
+        return hands.empty();
+    }
+};
+// -----------------------------------------------------------------------------
+// Legal private hand-pair table
+// -----------------------------------------------------------------------------
+//
+// This table stores legal P0/P1 hand pairs once for the whole subgame.
+//
+// It replaces:
+//
+//   root chance -> exact P0/P1 private hand pair -> duplicate subtree
+//
+// with:
+//
+//   public tree
+//   + one compact legal-pair table
+//   + terminal evaluator over legal pairs
 
-struct InfoSet {
-    int id = -1;
+struct HandPairTable {
+    // Flat legal pair arrays.
+    //
+    // p0_index[k] and p1_index[k] are indices into:
+    //   p0_domain.hands
+    //   p1_domain.hands
+    std::vector<int> p0_index;
+    std::vector<int> p1_index;
 
-    Player player = Player::Terminal;
-
-    // Debuggable serialized key.
-    //
-    // For Kuhn this might be:
-    //   "P0|K|cb"
-    //
-    // For Hold'em this might be:
-    //   "p=P0|st=river|board=As7h2cJd4s|hbucket=123|hist=b1000|..."
-    //
-    // The key must be created by the game-specific builder.
-    std::string key;
-
-    // Legal actions available at this infoset.
-    //
-    // Same size/order as q_indices.
-    std::vector<GameAction> actions;
-
-    // Flat strategy-vector indices corresponding to actions.
-    //
-    // Same size/order as actions.
-    std::vector<int> q_indices;
+    [[nodiscard]] int pair_count() const {
+        return static_cast<int>(p0_index.size());
+    }
+    [[nodiscard]] bool empty() const {
+        return p0_index.empty();
+    }
 };
 
-// A flat strategy entry q = (infoset, local action).
-struct InfoSetAction {
-    int q = -1;
-    int infoset = -1;
-    int local_action = -1;
+// -----------------------------------------------------------------------------
+// Action-state tensor metadata
+// -----------------------------------------------------------------------------
+// An ActionState is the hand-aware equivalent of an infoset-action block.
+// Strategy/regret arrays are indexed as:
+//   tensor_offset
+// + bucket * action_count
+// + local_action
+// State-only hand/bucket arrays are indexed as:
+//   state_bucket_offset
+// + bucket
 
-    GameAction action;
+struct ActionState {
+    int node;
+    int player;
+    int bucket_count;
+    int action_count;
+    int first_action;
+    std::uint64_t tensor_offset;
+    std::uint64_t state_bucket_offset;
+    [[nodiscard]] std::size_t tensor_index(
+    int bucket,
+    int local_action
+) const {
+        if (bucket < 0 || bucket >= bucket_count) {
+            throw std::invalid_argument("ActionState bucket out of range.");
+        }
+
+        if (local_action < 0 || local_action >= action_count) {
+            throw std::invalid_argument("ActionState local_action out of range.");
+        }
+
+        return static_cast<std::size_t>(tensor_offset) +
+               static_cast<std::size_t>(bucket) *
+                   static_cast<std::size_t>(action_count) +
+               static_cast<std::size_t>(local_action);
+    }
+    [[nodiscard]] std::size_t state_bucket_index(int bucket) const {
+        if (bucket < 0 || bucket >= bucket_count) {
+            throw std::invalid_argument("ActionState bucket out of range.");
+        }
+
+        return static_cast<std::size_t>(state_bucket_offset) +
+               static_cast<std::size_t>(bucket);
+    }
 };
 
 // -----------------------------------------------------------------------------
-// Complete game container
+// Memory estimate
 // -----------------------------------------------------------------------------
 
-struct Game {
-    std::vector<Node> nodes;
-    std::vector<InfoSet> infosets;
-    std::vector<InfoSetAction> q_entries;
+struct GameMemoryEstimate {
+    std::size_t node_bytes = 0;
+    std::size_t edge_bytes = 0;
+    std::size_t action_bytes = 0;
+    std::size_t action_state_bytes = 0;
 
-    int root = 0;
+    std::size_t p0_hand_bytes = 0;
+    std::size_t p1_hand_bytes = 0;
+    std::size_t hand_pair_bytes = 0;
+
+    std::size_t terminal_node_bytes = 0;
+    std::size_t terminal_index_by_node_bytes = 0;
+    std::size_t terminal_value_p0_bytes = 0;
+
+    std::size_t cfr_tensor_entries = 0;
+    std::size_t state_bucket_entries = 0;
+
+    std::size_t bytes_per_float_tensor = 0;
+    std::size_t bytes_per_state_bucket_float_array = 0;
+
+    std::size_t public_tree_bytes = 0;
+    std::size_t hand_side_table_bytes = 0;
+    std::size_t terminal_bytes = 0;
+
+    std::size_t game_owned_bytes = 0;
+
+    // Optional but useful: actual reserved heap memory.
+    std::size_t game_owned_capacity_bytes = 0;
+};
+
+// -----------------------------------------------------------------------------
+// Game
+// -----------------------------------------------------------------------------
+
+class Game {
+public:
+    int root = -1;
     int num_players = 2;
     int max_depth = 0;
+    // Compact public tree.
+    std::vector<PublicNode> nodes;
+    std::vector<NodeEdge> edges;
+    std::vector<GameAction> actions;
+    // CFR tensor metadata.
+    std::vector<ActionState> action_states;
+    // Hand-aware side data.
+    HandDomain p0_hands;
+    HandDomain p1_hands;
+    HandPairTable hand_pairs;
 
-    const Node& node(int id) const {
-        assert(id >= 0);
-        assert(id < static_cast<int>(nodes.size()));
-        return nodes[static_cast<std::size_t>(id)];
-    }
+    std::vector<int> terminal_nodes;
+    // terminal_index_by_node[node_id] = terminal index, or -1 for nonterminal.
+    std::vector<int> terminal_index_by_node;
+    std::vector<float> terminal_value_p0;
 
-    Node& node(int id) {
-        assert(id >= 0);
-        assert(id < static_cast<int>(nodes.size()));
-        return nodes[static_cast<std::size_t>(id)];
-    }
+    Game() = default;
+    void print_game_memory_usage() const;
+    // ---------------------------------------------------------------------
+    // Public tree construction
+    // ---------------------------------------------------------------------
 
-    const InfoSet& infoset(int id) const {
-        assert(id >= 0);
-        assert(id < static_cast<int>(infosets.size()));
-        return infosets[static_cast<std::size_t>(id)];
-    }
+    int add_node(PublicNode node);
 
-    InfoSet& infoset(int id) {
-        assert(id >= 0);
-        assert(id < static_cast<int>(infosets.size()));
-        return infosets[static_cast<std::size_t>(id)];
-    }
+    int add_action(const GameAction& action);
 
-    const InfoSetAction& q_entry(int q) const {
-        assert(q >= 0);
-        assert(q < static_cast<int>(q_entries.size()));
-        return q_entries[static_cast<std::size_t>(q)];
-    }
+    void add_action_child(
+        int parent,
+        int child,
+        int action_index
+    );
 
-    InfoSetAction& q_entry(int q) {
-        assert(q >= 0);
-        assert(q < static_cast<int>(q_entries.size()));
-        return q_entries[static_cast<std::size_t>(q)];
-    }
+    void add_chance_child(
+        int parent,
+        int child,
+        int public_card,
+        float probability
+    );
 
-    int num_nodes() const {
-        return static_cast<int>(nodes.size());
-    }
+    // ---------------------------------------------------------------------
+    // Hand-domain setup
+    // ---------------------------------------------------------------------
 
-    int num_infosets() const {
-        return static_cast<int>(infosets.size());
-    }
+    void set_hand_domains(
+        HandDomain p0,
+        HandDomain p1,
+        HandPairTable pairs
+    );
 
-    int num_q() const {
-        return static_cast<int>(q_entries.size());
-    }
+    const HandDomain& hand_domain(Player player) const;
+    HandDomain& hand_domain(Player player);
+    int bucket_count(Player player) const;
 
-    bool empty() const {
-        return nodes.empty();
-    }
+    // ---------------------------------------------------------------------
+    // Action-state registration
+    // ---------------------------------------------------------------------
+
+    int register_action_state(
+        int node_id,
+        Player player
+    );
+
+    // ---------------------------------------------------------------------
+    // Accessors
+    // ---------------------------------------------------------------------
+
+    const PublicNode& node(int id) const;
+    PublicNode& node(int id);
+
+    const NodeEdge& edge(int id) const;
+    NodeEdge& edge(int id);
+
+    const GameAction& action(int id) const;
+    GameAction& action(int id);
+
+    const ActionState& action_state(int id) const;
+    ActionState& action_state(int id);
+
+    int num_nodes() const;
+    int num_edges() const;
+    int num_actions() const;
+    int num_action_states() const;
+
+    std::size_t cfr_tensor_entries() const;
+    std::size_t state_bucket_entries() const;
+
+    GameMemoryEstimate estimate_memory() const;
+
+    void validate() const;
+
+private:
+    void attach_edge(
+        int parent,
+        NodeEdge edge
+    );
 };
 
 // -----------------------------------------------------------------------------
-// Build context
-// -----------------------------------------------------------------------------
-//
-// This replaces the Kuhn-specific BuildContext that used:
-//
-//   Player + Card + public_history
-//
-// The new BuildContext uses a generic serialized infoset key.
-// KuhnBuilder and HoldemSubgameBuilder are responsible for creating that key.
-
-struct BuildContext {
-    Game game;
-
-    std::unordered_map<std::string, int> infoset_key_to_id;
-
-    int add_node(Node node) {
-        node.id = static_cast<int>(game.nodes.size());
-
-        if (node.parent >= 0) {
-            const Node& parent = game.node(node.parent);
-            node.depth = parent.depth + 1;
-        }
-
-        game.max_depth = std::max<int>(game.max_depth, node.depth);
-
-        game.nodes.push_back(std::move(node));
-
-        return game.nodes.back().id;
-    }
-
-    void add_child(int parent_id, int child_id) {
-        if (parent_id < 0 || parent_id >= game.num_nodes()) {
-            throw std::invalid_argument("add_child parent_id out of range.");
-        }
-
-        if (child_id < 0 || child_id >= game.num_nodes()) {
-            throw std::invalid_argument("add_child child_id out of range.");
-        }
-
-        Node& parent = game.node(parent_id);
-        Node& child = game.node(child_id);
-
-        child.parent = parent_id;
-
-        if (child.depth != parent.depth + 1) {
-            child.depth = parent.depth + 1;
-            game.max_depth = std::max<int>(game.max_depth, child.depth);
-        }
-
-        parent.children.push_back(child_id);
-    }
-
-    int get_or_create_infoset(
-        Player player,
-        const std::string& key,
-        const std::vector<GameAction>& actions
-    ) {
-        if (!is_real_player(player)) {
-            throw std::invalid_argument(
-                "Infoset owner must be P0 or P1."
-            );
-        }
-
-        if (key.empty()) {
-            throw std::invalid_argument(
-                "Infoset key cannot be empty."
-            );
-        }
-
-        if (actions.empty()) {
-            throw std::invalid_argument(
-                "Infoset must contain at least one action."
-            );
-        }
-
-        const auto found = infoset_key_to_id.find(key);
-
-        if (found != infoset_key_to_id.end()) {
-            const int infoset_id = found->second;
-            InfoSet& infoset = game.infoset(infoset_id);
-
-            if (infoset.player != player) {
-                throw std::runtime_error(
-                    "Existing infoset player does not match requested player."
-                );
-            }
-
-            if (infoset.actions.size() != actions.size()) {
-                throw std::runtime_error(
-                    "Existing infoset action count does not match requested actions."
-                );
-            }
-
-            for (std::size_t i = 0; i < actions.size(); ++i) {
-                if (infoset.actions[i] != actions[i]) {
-                    throw std::runtime_error(
-                        "Existing infoset actions do not match requested actions."
-                    );
-                }
-            }
-
-            return infoset_id;
-        }
-
-        InfoSet infoset;
-        infoset.id = static_cast<int>(game.infosets.size());
-        infoset.player = player;
-        infoset.key = key;
-        infoset.actions = actions;
-
-        infoset.q_indices.reserve(actions.size());
-
-        for (int local = 0; local < static_cast<int>(actions.size()); ++local) {
-            const int q = static_cast<int>(game.q_entries.size());
-
-            infoset.q_indices.push_back(q);
-
-            InfoSetAction q_entry;
-            q_entry.q = q;
-            q_entry.infoset = infoset.id;
-            q_entry.local_action = local;
-            q_entry.action = actions[static_cast<std::size_t>(local)];
-
-            game.q_entries.push_back(std::move(q_entry));
-        }
-
-        const int infoset_id = infoset.id;
-
-        game.infosets.push_back(std::move(infoset));
-        infoset_key_to_id.emplace(key, infoset_id);
-
-        return infoset_id;
-    }
-};
-
-// -----------------------------------------------------------------------------
-// Validation helpers
+// Inline accessors
 // -----------------------------------------------------------------------------
 
-inline void validate_game_basic_shape(const Game& game) {
-    if (game.nodes.empty()) {
-        throw std::invalid_argument("Game must contain at least one node.");
-    }
-
-    if (game.root < 0 || game.root >= game.num_nodes()) {
-        throw std::invalid_argument("Game root is out of range.");
-    }
-
-    if (game.num_players != 2) {
-        throw std::invalid_argument(
-            "This CFR implementation currently expects two players."
-        );
-    }
-
-    for (const Node& node : game.nodes) {
-        if (node.id < 0 || node.id >= game.num_nodes()) {
-            throw std::invalid_argument("Node id out of range.");
-        }
-
-        if (node.id == game.root) {
-            if (node.parent != -1) {
-                throw std::invalid_argument("Root node must have parent -1.");
-            }
-        } else {
-            if (node.parent < 0 || node.parent >= game.num_nodes()) {
-                throw std::invalid_argument(
-                    "Non-root node has invalid parent."
-                );
-            }
-        }
-
-        if (node.depth < 0 || node.depth > game.max_depth) {
-            throw std::invalid_argument("Node depth out of range.");
-        }
-
-        if (node.terminal) {
-            if (node.player != Player::Terminal) {
-                throw std::invalid_argument(
-                    "Terminal node must have player Terminal."
-                );
-            }
-
-            if (!node.children.empty()) {
-                throw std::invalid_argument(
-                    "Terminal node cannot have children."
-                );
-            }
-
-            if (node.infoset != -1) {
-                throw std::invalid_argument(
-                    "Terminal node cannot have infoset."
-                );
-            }
-        }
-
-        if (node.player == Player::Chance) {
-            if (node.infoset != -1) {
-                throw std::invalid_argument(
-                    "Chance node cannot have infoset."
-                );
-            }
-        }
-
-        if (is_real_player(node.player)) {
-            if (node.infoset < 0 || node.infoset >= game.num_infosets()) {
-                throw std::invalid_argument(
-                    "Real-player node has invalid infoset."
-                );
-            }
-        }
-
-        for (int child_id : node.children) {
-            if (child_id < 0 || child_id >= game.num_nodes()) {
-                throw std::invalid_argument("Child id out of range.");
-            }
-
-            const Node& child = game.node(child_id);
-
-            if (child.parent != node.id) {
-                throw std::invalid_argument(
-                    "Parent/child pointer mismatch."
-                );
-            }
-
-            if (child.depth != node.depth + 1) {
-                throw std::invalid_argument(
-                    "Child depth must equal parent depth + 1 | Child Depth: " + std::to_string(child.depth) + " | Parent Depth: " + std::to_string(node.depth)
-                );
-            }
-        }
-
-        if (node.player == Player::Chance && !node.children.empty()) {
-            double probability_sum = 0.0;
-
-            for (int child_id : node.children) {
-                const Node& child = game.node(child_id);
-
-                if (child.chance_prob <= 0.0f) {
-                    throw std::invalid_argument(
-                        "Chance child must have positive probability."
-                    );
-                }
-
-                probability_sum += static_cast<double>(child.chance_prob);
-            }
-
-            if (probability_sum < 0.99999 || probability_sum > 1.00001) {
-                throw std::invalid_argument(
-                    "Chance child probabilities must sum to 1."
-                );
-            }
-        }
-    }
-
-    for (const InfoSet& infoset : game.infosets) {
-        if (infoset.id < 0 || infoset.id >= game.num_infosets()) {
-            throw std::invalid_argument("Infoset id out of range.");
-        }
-
-        if (!is_real_player(infoset.player)) {
-            throw std::invalid_argument(
-                "Infoset owner must be P0 or P1."
-            );
-        }
-
-        if (infoset.key.empty()) {
-            throw std::invalid_argument(
-                "Infoset key cannot be empty."
-            );
-        }
-
-        if (infoset.actions.empty()) {
-            throw std::invalid_argument(
-                "Infoset must have actions."
-            );
-        }
-
-        if (infoset.actions.size() != infoset.q_indices.size()) {
-            throw std::invalid_argument(
-                "Infoset actions and q_indices size mismatch."
-            );
-        }
-
-        for (int local = 0; local < static_cast<int>(infoset.q_indices.size()); ++local) {
-            const int q = infoset.q_indices[static_cast<std::size_t>(local)];
-
-            if (q < 0 || q >= game.num_q()) {
-                throw std::invalid_argument(
-                    "Infoset q index out of range."
-                );
-            }
-
-            const InfoSetAction& q_entry = game.q_entry(q);
-
-            if (q_entry.q != q) {
-                throw std::invalid_argument(
-                    "q_entry.q does not match index."
-                );
-            }
-
-            if (q_entry.infoset != infoset.id) {
-                throw std::invalid_argument(
-                    "q_entry infoset does not match owner."
-                );
-            }
-
-            if (q_entry.local_action != local) {
-                throw std::invalid_argument(
-                    "q_entry local_action does not match position."
-                );
-            }
-
-            if (q_entry.action != infoset.actions[static_cast<std::size_t>(local)]) {
-                throw std::invalid_argument(
-                    "q_entry action does not match infoset action."
-                );
-            }
-        }
-    }
+inline const PublicNode& Game::node(int id) const {
+    assert(id >= 0);
+    assert(id < static_cast<int>(nodes.size()));
+    return nodes[static_cast<std::size_t>(id)];
 }
 
+inline PublicNode& Game::node(int id) {
+    assert(id >= 0);
+    assert(id < static_cast<int>(nodes.size()));
+    return nodes[static_cast<std::size_t>(id)];
+}
+
+inline const NodeEdge& Game::edge(int id) const {
+    assert(id >= 0);
+    assert(id < static_cast<int>(edges.size()));
+    return edges[static_cast<std::size_t>(id)];
+}
+
+inline NodeEdge& Game::edge(int id) {
+    assert(id >= 0);
+    assert(id < static_cast<int>(edges.size()));
+    return edges[static_cast<std::size_t>(id)];
+}
+
+inline const GameAction& Game::action(int id) const {
+    assert(id >= 0);
+    assert(id < static_cast<int>(actions.size()));
+    return actions[static_cast<std::size_t>(id)];
+}
+
+inline GameAction& Game::action(int id) {
+    assert(id >= 0);
+    assert(id < static_cast<int>(actions.size()));
+    return actions[static_cast<std::size_t>(id)];
+}
+
+inline const ActionState& Game::action_state(int id) const {
+    assert(id >= 0);
+    assert(id < static_cast<int>(action_states.size()));
+    return action_states[static_cast<std::size_t>(id)];
+}
+
+inline ActionState& Game::action_state(int id) {
+    assert(id >= 0);
+    assert(id < static_cast<int>(action_states.size()));
+    return action_states[static_cast<std::size_t>(id)];
+}
+
+inline int Game::num_nodes() const {
+    return static_cast<int>(nodes.size());
+}
+
+inline int Game::num_edges() const {
+    return static_cast<int>(edges.size());
+}
+
+inline int Game::num_actions() const {
+    return static_cast<int>(actions.size());
+}
+
+inline int Game::num_action_states() const {
+    return static_cast<int>(action_states.size());
+}
+
+    inline std::size_t Game::cfr_tensor_entries() const {
+    if (action_states.empty()) {
+        return 0;
+    }
+
+    const ActionState& last = action_states.back();
+    return static_cast<std::size_t>(last.tensor_offset) +
+           static_cast<std::size_t>(last.bucket_count) *
+           static_cast<std::size_t>(last.action_count);
+}
+
+    inline std::size_t Game::state_bucket_entries() const {
+    if (action_states.empty()) {
+        return 0;
+    }
+
+    const ActionState& last = action_states.back();
+    return static_cast<std::size_t>(last.state_bucket_offset) +
+           static_cast<std::size_t>(last.bucket_count);
+}
+
+inline const HandDomain& Game::hand_domain(Player player) const {
+    if (player == Player::P0) {
+        return p0_hands;
+    }
+
+    if (player == Player::P1) {
+        return p1_hands;
+    }
+
+    throw std::invalid_argument("hand_domain requires P0 or P1.");
+}
+
+inline HandDomain& Game::hand_domain(Player player) {
+    if (player == Player::P0) {
+        return p0_hands;
+    }
+
+    if (player == Player::P1) {
+        return p1_hands;
+    }
+
+    throw std::invalid_argument("hand_domain requires P0 or P1.");
+}
+
+// -----------------------------------------------------------------------------
+// Standalone index helpers
+// -----------------------------------------------------------------------------
+
+inline std::size_t strategy_tensor_index(
+    const Game& game,
+    int action_state_id,
+    int bucket,
+    int local_action
+) {
+    return game.action_state(action_state_id).tensor_index(
+        bucket,
+        local_action
+    );
+}
 } // namespace poker
