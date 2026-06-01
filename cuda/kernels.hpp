@@ -1,28 +1,50 @@
 #pragma once
 
-#include "gpu_state.hpp"
+#include "cfr_gpu.hpp"
+#include <cstdint>
 #include <cuda_runtime_api.h>
 
 namespace poker {
+
+// -----------------------------------------------------------------------------
+// Kernel launch configuration
+// -----------------------------------------------------------------------------
 
 struct KernelLaunchConfig {
     int threads_per_block = 256;
 };
 
-int blocks_for(int n, int threads_per_block);
+int blocks_for(
+    int n,
+    int threads_per_block
+);
+
+int blocks_for_size(
+    std::size_t n,
+    int threads_per_block
+);
 
 // -----------------------------------------------------------------------------
-// Initialization / reset kernels
+// Generic utility kernels
 // -----------------------------------------------------------------------------
 
 void launch_fill_float(
     const KernelLaunchConfig& config,
     float* d_values,
     float value,
-    int count,
+    std::size_t count,
     cudaStream_t stream = nullptr
 );
 
+void launch_copy_float(
+    const KernelLaunchConfig& config,
+    const float* d_src,
+    float* d_dst,
+    std::size_t count,
+    cudaStream_t stream = nullptr
+);
+
+// Convenience overload for older call sites that still pass int.
 void launch_copy_float(
     const KernelLaunchConfig& config,
     const float* d_src,
@@ -31,192 +53,400 @@ void launch_copy_float(
     cudaStream_t stream = nullptr
 );
 
-void launch_initialize_uniform_strategy(
+// -----------------------------------------------------------------------------
+// Strategy initialization
+// -----------------------------------------------------------------------------
+//
+// For each action state and bucket:
+//
+//   sigma[offset + bucket * action_count + a] = 1 / action_count
+//   sigma_init[...] = same
+//
+// This replaces old:
+//
+//   launch_initialize_uniform_strategy(
+//       d_infoset_q_begin,
+//       d_infoset_q_count,
+//       ...
+//   )
+
+void launch_initialize_public_uniform_strategy(
     const KernelLaunchConfig& config,
-    const int* d_infoset_q_begin,
-    const int* d_infoset_q_count,
+    const int* d_action_state_bucket_count,
+    const int* d_action_state_action_count,
+    const std::uint64_t* d_action_state_tensor_offset,
     float* d_sigma,
     float* d_sigma_init,
-    int num_infosets,
+    int num_action_states,
     cudaStream_t stream = nullptr
 );
 
 // -----------------------------------------------------------------------------
-// CFR stage A: incoming action probabilities
+// Terminal value loading
 // -----------------------------------------------------------------------------
+//
+// HostPrecomputed terminal mode.
+//
+// Input:
+//
+//   d_terminal_index_by_node[node_id] = terminal index, or -1
+//
+//   d_terminal_value_p0[
+//       terminal_index * hand_pair_count + pair_id
+//   ]
+//
+// Output:
+//
+//   d_node_pair_value_p0[
+//       node_id * hand_pair_count + pair_id
+//   ]
+//
+// Nonterminal nodes should receive 0.
 
-void launch_compute_incoming_probabilities_level(
+void launch_load_precomputed_terminal_pair_values(
     const KernelLaunchConfig& config,
-    const DeviceLevelEdges& edges,
-    const int* d_player,
-    const float* d_chance_prob,
-    const float* d_sigma,
-    float* d_incoming_prob,
-    cudaStream_t stream = nullptr
-);
-
-// -----------------------------------------------------------------------------
-// CFR stage B: expected utility, backward pass
-// -----------------------------------------------------------------------------
-
-void launch_initialize_terminal_utilities(
-    const KernelLaunchConfig& config,
-    const float* d_terminal_u_p0,
-    float* d_u_p0,
     int num_nodes,
-    cudaStream_t stream = nullptr
-);
-
-void launch_backward_utility_level(
-    const KernelLaunchConfig& config,
-    const DeviceLevelEdges& edges,
-    const float* d_incoming_prob,
-    const float* d_u_p0_read,
-    float* d_u_p0_write,
+    int hand_pair_count,
+    int terminal_count,
+    const int* d_terminal_index_by_node,
+    const float* d_terminal_value_p0,
+    float* d_node_pair_value_p0,
     cudaStream_t stream = nullptr
 );
 
 // -----------------------------------------------------------------------------
-// CFR stage C: counterfactual reach, forward pass
+// Backward value pass
 // -----------------------------------------------------------------------------
+//
+// Computes one public-tree depth layer.
+//
+// Input/output layout:
+//
+//   node_pair_value[
+//       node_id * hand_pair_count + pair_id
+//   ]
+//
+// For chance edges:
+//
+//   parent_value[pair] += chance_prob * child_value[pair]
+//
+// For action edges:
+//
+//   acting player determines bucket:
+//      P0 -> p0_bucket_by_hand_index[p0_pair_index[pair]]
+//      P1 -> p1_bucket_by_hand_index[p1_pair_index[pair]]
+//
+//   parent_value[pair] += sigma[state,bucket,local_action] * child_value[pair]
+//
+// The kernel should zero/overwrite parent entries for parents represented in
+// this level before accumulating children.
 
-void launch_initialize_reach(
+void launch_public_backward_pair_value_level(
     const KernelLaunchConfig& config,
-    float* d_reach_p0,
-    float* d_reach_p1,
-    int num_nodes,
-    int root,
-    cudaStream_t stream = nullptr
-);
+    const DevicePublicLevelEdges& edges,
 
-void launch_forward_reach_level(
-    const KernelLaunchConfig& config,
-    const DeviceLevelEdges& edges,
+    const int* d_node_type,
     const int* d_player,
-    const float* d_incoming_prob,
-    const float* d_reach_p0_read,
-    const float* d_reach_p1_read,
-    float* d_reach_p0_write,
-    float* d_reach_p1_write,
-    cudaStream_t stream = nullptr
-);
+    const int* d_action_state_index,
 
-void launch_compute_infoset_reach(
-    const KernelLaunchConfig& config,
-    const int* d_infoset_player,
-    const int* d_infoset_node_begin,
-    const int* d_infoset_node_count,
-    const int* d_infoset_nodes,
-    const float* d_reach_p0,
-    const float* d_reach_p1,
-    float* d_infoset_reach,
-    int num_infosets,
-    cudaStream_t stream = nullptr
-);
-void launch_forward_own_reach_level(
-    const KernelLaunchConfig& config,
-    const DeviceLevelEdges& edges,
-    const int* d_player,
+    const int* d_action_state_action_count,
+    const std::uint64_t* d_action_state_tensor_offset,
+
+    const int* d_p0_pair_index,
+    const int* d_p1_pair_index,
+    const int* d_p0_bucket_by_hand_index,
+    const int* d_p1_bucket_by_hand_index,
+
     const float* d_sigma,
-    const float* d_own_reach_p0_read,
-    const float* d_own_reach_p1_read,
-    float* d_own_reach_p0_write,
-    float* d_own_reach_p1_write,
+
+    // Read child values from here.
+    const float* d_node_pair_value_read,
+
+    // Write parent values here.
+    float* d_node_pair_value_write,
+
+    int hand_pair_count,
     cudaStream_t stream = nullptr
 );
 
-void launch_compute_own_infoset_reach(
-    const KernelLaunchConfig& config,
-    const int* d_infoset_player,
-    const int* d_infoset_node_begin,
-    const int* d_infoset_node_count,
-    const int* d_infoset_nodes,
-    const float* d_own_reach_p0,
-    const float* d_own_reach_p1,
-    float* d_own_infoset_reach,
-    int num_infosets,
-    cudaStream_t stream = nullptr
-);
 // -----------------------------------------------------------------------------
-// CFR stage D: regret computation
+// Reach computation
 // -----------------------------------------------------------------------------
+//
+// Computes per-action-state bucket reaches used for regret and average strategy.
+//
+// Outputs:
+//
+//   d_state_bucket_cf_reach[
+//       action_state_bucket_offset[state] + bucket
+//   ]
+//
+//   d_state_bucket_own_reach[
+//       action_state_bucket_offset[state] + bucket
+//   ]
+//
+// Exact implementation details can evolve, but for the validation version this
+// kernel can compute reaches by iterating legal hand pairs and public-tree paths.
+//
+// Acting player bucket for pair:
+//
+//   P0 bucket:
+//      d_p0_bucket_by_hand_index[d_p0_pair_index[pair]]
+//
+//   P1 bucket:
+//      d_p1_bucket_by_hand_index[d_p1_pair_index[pair]]
 
-void launch_compute_instantaneous_regrets(
-    const KernelLaunchConfig& config,
-    const DeviceDecisionEdges& decision_edges,
-    const int* d_player,
-    const float* d_u_p0,
-    const float* d_reach_p0,
-    const float* d_reach_p1,
-    float* d_inst_regret,
-    cudaStream_t stream = nullptr
-);
+    void launch_initialize_public_pair_reaches(
+        const KernelLaunchConfig& config,
+        int root,
+        int hand_pair_count,
+        float* d_node_pair_reach_p0,
+        float* d_node_pair_reach_p1,
+        float* d_node_pair_reach_chance,
+        cudaStream_t stream = nullptr
+    );
 
-void launch_update_regrets(
+    void launch_public_forward_pair_reach_level(
+        const KernelLaunchConfig& config,
+        const DevicePublicLevelEdges& edges,
+
+        const int* d_node_type,
+        const int* d_player,
+        const int* d_action_state_index,
+
+        const int* d_action_state_action_count,
+        const std::uint64_t* d_action_state_tensor_offset,
+
+        const int* d_p0_pair_index,
+        const int* d_p1_pair_index,
+        const int* d_p0_bucket_by_hand_index,
+        const int* d_p1_bucket_by_hand_index,
+
+        const float* d_sigma,
+
+        float* d_node_pair_reach_p0,
+        float* d_node_pair_reach_p1,
+        float* d_node_pair_reach_chance,
+
+        int hand_pair_count,
+        cudaStream_t stream = nullptr
+    );
+
+    void launch_public_aggregate_state_bucket_reaches(
+        const KernelLaunchConfig& config,
+
+        const int* d_action_state_node,
+        const int* d_action_state_player,
+        const int* d_action_state_bucket_count,
+        const std::uint64_t* d_action_state_bucket_offset,
+
+        int hand_pair_count,
+        const int* d_p0_pair_index,
+        const int* d_p1_pair_index,
+        const int* d_p0_bucket_by_hand_index,
+        const int* d_p1_bucket_by_hand_index,
+
+        const float* d_node_pair_reach_p0,
+        const float* d_node_pair_reach_p1,
+        const float* d_node_pair_reach_chance,
+
+        float* d_state_bucket_cf_reach,
+        float* d_state_bucket_own_reach,
+
+        int num_action_states,
+        cudaStream_t stream = nullptr
+    );
+
+// -----------------------------------------------------------------------------
+// Action value extraction
+// -----------------------------------------------------------------------------
+//
+// Converts child node-pair values into action-state bucket action values.
+//
+// Output:
+//
+//   d_action_value_p0[
+//       tensor_offset[state] + bucket * action_count + local_action
+//   ]
+//
+// Because many hand pairs can map into the same bucket, the kernel should
+// aggregate or average appropriately. For exact-domain mode, each bucket is one
+// exact hand index, but there are still multiple opponent hands per bucket.
+
+    void launch_public_compute_action_values_from_pair_values(
+        const KernelLaunchConfig& config,
+
+        const DevicePublicActionEdges& action_edges,
+
+        const int* d_action_state_player,
+        const int* d_action_state_bucket_count,
+        const int* d_action_state_action_count,
+        const std::uint64_t* d_action_state_tensor_offset,
+        const std::uint64_t* d_action_state_bucket_offset,
+
+        int hand_pair_count,
+        const int* d_p0_pair_index,
+        const int* d_p1_pair_index,
+        const int* d_p0_bucket_by_hand_index,
+        const int* d_p1_bucket_by_hand_index,
+
+        const float* d_node_pair_value_p0,
+
+        const float* d_node_pair_reach_p0,
+        const float* d_node_pair_reach_p1,
+        const float* d_node_pair_reach_chance,
+        const float* d_state_bucket_cf_reach,
+
+        float* d_action_value_p0,
+
+        cudaStream_t stream = nullptr
+    );
+
+// -----------------------------------------------------------------------------
+// Regret update
+// -----------------------------------------------------------------------------
+//
+// For each action state and bucket:
+//
+//   state_value = sum_a sigma[a] * action_value[a]
+//
+// For P0 action states:
+//
+//   regret_delta[a] = cf_reach * (action_value_p0[a] - state_value_p0)
+//
+// For P1 action states, utility is from P1 perspective, so:
+//
+//   regret_delta[a] = cf_reach * (
+//       -action_value_p0[a] - (-state_value_p0)
+//   )
+//
+// CFR+:
+//
+//   regret_sum[idx] = max(0, regret_sum[idx] + regret_delta)
+//
+// Vanilla CFR:
+//
+//   regret_sum[idx] += regret_delta
+//
+// Also writes:
+//
+//   d_state_bucket_value_p0[state_bucket_index] = state_value_p0
+
+void launch_public_update_regrets(
     const KernelLaunchConfig& config,
-    const float* d_inst_regret,
+
+    const int* d_action_state_player,
+    const int* d_action_state_bucket_count,
+    const int* d_action_state_action_count,
+    const std::uint64_t* d_action_state_tensor_offset,
+    const std::uint64_t* d_action_state_bucket_offset,
+
+    const float* d_action_value_p0,
+    float* d_state_bucket_value_p0,
+    const float* d_state_bucket_cf_reach,
+
+    const float* d_sigma,
     float* d_regret_sum,
-    int num_q,
+
+    int num_action_states,
     bool use_cfr_plus,
+
     cudaStream_t stream = nullptr
 );
 
 // -----------------------------------------------------------------------------
-// CFR stage E: regret matching
+// Average strategy accumulation
 // -----------------------------------------------------------------------------
+//
+// For each action-state bucket/action:
+//
+//   strategy_sum[idx] += own_reach[state_bucket] * iteration_weight * sigma[idx]
+//
+// and:
+//
+//   strategy_weight_sum[state_bucket] += own_reach[state_bucket] * iteration_weight
+//
+// Note:
+//   The implementation should add the denominator once per bucket, not once per
+//   action.
 
-void launch_clear_positive_regret_sums(
+void launch_public_accumulate_average_strategy(
     const KernelLaunchConfig& config,
-    float* d_positive_regret_sum,
-    int num_infosets,
-    cudaStream_t stream = nullptr
-);
 
-void launch_accumulate_positive_regret_sums(
-    const KernelLaunchConfig& config,
-    const float* d_regret_sum,
-    const int* d_q_infoset,
-    float* d_positive_regret_sum,
-    int num_q,
-    cudaStream_t stream = nullptr
-);
+    const int* d_action_state_bucket_count,
+    const int* d_action_state_action_count,
+    const std::uint64_t* d_action_state_tensor_offset,
+    const std::uint64_t* d_action_state_bucket_offset,
 
-void launch_regret_matching(
-    const KernelLaunchConfig& config,
-    const float* d_regret_sum,
-    const float* d_positive_regret_sum,
-    const float* d_sigma_init,
-    const int* d_q_infoset,
-    float* d_sigma,
-    int num_q,
-    cudaStream_t stream = nullptr
-);
-
-// -----------------------------------------------------------------------------
-// CFR stage F: average strategy accumulation
-// -----------------------------------------------------------------------------
-
-void launch_accumulate_average_strategy(
-    const KernelLaunchConfig& config,
-    const int* d_q_infoset,
-    const int* d_infoset_q_begin,
+    const float* d_state_bucket_own_reach,
     const float* d_sigma,
-    const float* d_own_infoset_reach,
+
     float* d_strategy_sum,
     float* d_strategy_weight_sum,
-    int num_q,
+
+    int num_action_states,
     float iteration_weight,
+
     cudaStream_t stream = nullptr
 );
 
-void launch_normalize_average_strategy(
+// -----------------------------------------------------------------------------
+// Average strategy normalization
+// -----------------------------------------------------------------------------
+//
+// For each action-state bucket:
+//
+//   if weight_sum > 0:
+//       avg_strategy[a] = strategy_sum[a] / weight_sum
+//   else:
+//       avg_strategy[a] = uniform
+
+void launch_public_normalize_average_strategy(
     const KernelLaunchConfig& config,
-    const int* d_q_infoset,
+
+    const int* d_action_state_bucket_count,
+    const int* d_action_state_action_count,
+    const std::uint64_t* d_action_state_tensor_offset,
+    const std::uint64_t* d_action_state_bucket_offset,
+
     const float* d_strategy_sum,
     const float* d_strategy_weight_sum,
-    const float* d_sigma_init,
+
     float* d_avg_strategy,
-    int num_q,
+
+    int num_action_states,
+
+    cudaStream_t stream = nullptr
+);
+
+// -----------------------------------------------------------------------------
+// Regret matching
+// -----------------------------------------------------------------------------
+//
+// For each action-state bucket:
+//
+//   positive_sum = sum_a max(regret_sum[a], 0)
+//
+//   if positive_sum > 0:
+//       sigma[a] = max(regret_sum[a], 0) / positive_sum
+//   else:
+//       sigma[a] = sigma_init[a]
+//
+// `sigma_init` should normally be uniform.
+
+void launch_public_regret_matching(
+    const KernelLaunchConfig& config,
+
+    const int* d_action_state_bucket_count,
+    const int* d_action_state_action_count,
+    const std::uint64_t* d_action_state_tensor_offset,
+
+    const float* d_regret_sum,
+    float* d_sigma,
+    const float* d_sigma_init,
+
+    int num_action_states,
+
     cudaStream_t stream = nullptr
 );
 

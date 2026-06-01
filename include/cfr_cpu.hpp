@@ -1,41 +1,97 @@
 #pragma once
 
 #include "game.hpp"
+#include "exploitability.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
 namespace poker {
 
+// -----------------------------------------------------------------------------
+// CPU CFR configuration / stats
+// -----------------------------------------------------------------------------
+
 struct CfrConfig {
-    // Number of players in standard two-player Kuhn.
     int num_players = 2;
 
-    // Whether to update both players in one traversal.
-    // For a first implementation, keep this true.
-    bool simultaneous_updates = true;
-
-    // Whether to use CFR+ style regret clipping.
-    // Start with false for vanilla CFR.
+    // CFR+ clips cumulative regret at zero after each regret update.
     bool use_cfr_plus = false;
 
-    // Weight applied to average-strategy accumulation.
-    // Vanilla CFR uses 1.0 each iteration.
+    // If false:
+    //   average-strategy weight = 1
+    //
+    // If true:
+    //   average-strategy weight = iteration number
+    //
+    // This is the same high-level option exposed in your GPU config.
     bool linear_averaging = false;
+
+    // If true, update both players' regrets in the same public-tree traversal.
+    //
+    // For your current two-player zero-sum public-tree solver, keep this true.
+    bool simultaneous_updates = true;
 };
 
 struct CfrStats {
     int iterations_run = 0;
 
-    // Optional diagnostic values.
-    // You can fill these later once exploitability is implemented.
+    // Expected root value from P0 perspective under the current strategy.
     double last_root_value_p0 = 0.0;
+
+    std::size_t tensor_entries = 0;
+    std::size_t state_bucket_entries = 0;
+    std::size_t hand_pair_count = 0;
 };
+
+// -----------------------------------------------------------------------------
+// CPU CFR solver for public-tree / hand-aware Game
+// -----------------------------------------------------------------------------
+//
+// This solver is for the new Game representation:
+//
+//   Game::nodes          compact public tree
+//   Game::edges          contiguous child ranges
+//   Game::action_states  hand-aware decision blocks
+//   Game::p0_hands       legal P0 hand domain
+//   Game::p1_hands       legal P1 hand domain
+//   Game::hand_pairs     legal non-overlapping P0/P1 hand pairs
+//
+// Strategy/regret tensors use:
+//
+//   index =
+//       action_state.tensor_offset
+//     + hand_bucket * action_state.action_count
+//     + local_action
+//
+// In your current exact-domain mode:
+//
+//   P0 bucket = game.hand_pairs.p0_index[pair_id]
+//   P1 bucket = game.hand_pairs.p1_index[pair_id]
+//
+// Terminal values are injected through TerminalValueProvider because the compact
+// PublicNode does not contain full PrivateState/PublicState terminal payloads.
 
 class CpuCfrSolver {
 public:
-    explicit CpuCfrSolver(const Game& game);
-    CpuCfrSolver(const Game& game, CfrConfig config);
+    CpuCfrSolver(
+        const Game& game,
+        const TerminalValueProvider& terminal_values
+    );
+
+    CpuCfrSolver(
+        const Game& game,
+        const TerminalValueProvider& terminal_values,
+        CfrConfig config
+    );
+
+    CpuCfrSolver(
+        const Game& game,
+        const TerminalValueProvider& terminal_values,
+        const HandPairWeightProvider& hand_pair_weights,
+        CfrConfig config = CfrConfig{}
+    );
 
     // Runs CFR for a fixed number of iterations.
     void run_iterations(int iterations);
@@ -43,71 +99,160 @@ public:
     // Runs exactly one CFR iteration.
     void run_one_iteration();
 
-    // Returns the current regret-matched strategy.
-    std::vector<float> current_strategy() const;
+    // Current regret-matched strategy tensor.
+    [[nodiscard]] StrategyTensor current_strategy() const;
 
-    // Returns the average strategy accumulated over all iterations.
-    std::vector<float> average_strategy() const;
+    // Normalized average strategy tensor.
+    [[nodiscard]] StrategyTensor average_strategy() const;
 
-    // Direct accessors useful for tests and debugging.
-    const std::vector<float>& regret_sum() const;
-    const std::vector<float>& strategy_sum() const;
-    const CfrStats& stats() const;
+    // Direct accessors for debugging/tests.
+    [[nodiscard]] const std::vector<float>& regret_sum() const;
+    [[nodiscard]] const std::vector<float>& strategy_sum() const;
+    [[nodiscard]] const std::vector<float>& strategy_weight_sum() const;
+    [[nodiscard]] const CfrStats& stats() const;
 
 private:
     const Game& game_;
+    const TerminalValueProvider& terminal_values_;
+    const HandPairWeightProvider* hand_pair_weights_ = nullptr;
+
     CfrConfig config_;
     CfrStats stats_;
 
-    // One entry per infoset-action pair q.
+    // One entry per action-state/bucket/action.
+    // Size = game_.cfr_tensor_entries().
     std::vector<float> regret_sum_;
     std::vector<float> strategy_sum_;
     std::vector<float> current_strategy_;
 
-    // Main recursive CFR traversal.
+    // One entry per action-state/bucket.
+    // Size = game_.state_bucket_entries().
     //
-    // reach_p0 and reach_p1 are the probabilities that each player has
-    // contributed to reaching this node under the current strategy.
-    float cfr_traverse(
+    // Used to normalize average_strategy().
+    std::vector<float> strategy_weight_sum_;
+
+    // ---------------------------------------------------------------------
+    // Traversal
+    // ---------------------------------------------------------------------
+
+    // Traverses the public tree for one exact legal hand pair.
+    //
+    // reach_p0:
+    //   P0's contribution to reaching this node.
+    //
+    // reach_p1:
+    //   P1's contribution to reaching this node.
+    //
+    // reach_chance:
+    //   Public chance contribution to reaching this node.
+    //
+    // Return:
+    //   expected utility from P0 perspective.
+    double cfr_traverse_pair(
         int node_id,
-        float reach_p0,
-        float reach_p1
+        int hand_pair_id,
+        double reach_p0,
+        double reach_p1,
+        double reach_chance
     );
 
-    // Handles chance nodes by averaging over chance outcomes.
-    float traverse_chance_node(
+    double traverse_chance_node(
         int node_id,
-        float reach_p0,
-        float reach_p1
+        int hand_pair_id,
+        double reach_p0,
+        double reach_p1,
+        double reach_chance
     );
 
-    // Handles real-player decision nodes.
-    float traverse_player_node(
+    double traverse_player_node(
         int node_id,
-        float reach_p0,
-        float reach_p1
+        int hand_pair_id,
+        double reach_p0,
+        double reach_p1,
+        double reach_chance
     );
 
-    // Converts regret_sum_ at one infoset into action probabilities.
-    void compute_strategy_for_infoset(int infoset_id);
+    double terminal_value_p0(
+        int node_id,
+        int hand_pair_id
+    ) const;
 
-    // Adds the current strategy into strategy_sum_ using the player's reach.
+    // ---------------------------------------------------------------------
+    // Strategy / regret helpers
+    // ---------------------------------------------------------------------
+
+    void initialize_uniform_strategy();
+
+    void compute_strategy_for_action_state_bucket(
+        const ActionState& action_state,
+        int bucket
+    );
+
+    void compute_all_current_strategies();
+
     void accumulate_average_strategy(
-        int infoset_id,
-        float player_reach_weight
+        const ActionState& action_state,
+        int bucket,
+        double weight
     );
 
-    // Updates regret values for each action at an infoset.
     void update_regrets(
-        int infoset_id,
-        const std::vector<float>& action_values,
-        float node_value,
-        float counterfactual_reach
+        const ActionState& action_state,
+        int bucket,
+        const std::vector<double>& action_values_p0,
+        double node_value_p0,
+        double counterfactual_reach,
+        Player acting_player
     );
 
-    // Utility helpers.
-    float terminal_value_p0(int node_id) const;
-    float utility_for_player(float utility_p0, Player player) const;
+    // ---------------------------------------------------------------------
+    // Indexing helpers
+    // ---------------------------------------------------------------------
+
+    [[nodiscard]] const ActionState& action_state_for_node(
+        const PublicNode& node
+    ) const;
+
+    [[nodiscard]] int bucket_for_pair(
+        Player player,
+        int hand_pair_id
+    ) const;
+
+    [[nodiscard]] std::size_t tensor_index(
+        const ActionState& action_state,
+        int bucket,
+        int local_action
+    ) const;
+
+    [[nodiscard]] std::size_t state_bucket_index(
+        const ActionState& action_state,
+        int bucket
+    ) const;
+
+    [[nodiscard]] int edge_id(
+        const PublicNode& node,
+        int local_action
+    ) const;
+
+    [[nodiscard]] const NodeEdge& outgoing_edge(
+        const PublicNode& node,
+        int local_action
+    ) const;
+
+    [[nodiscard]] double hand_pair_weight(
+        int hand_pair_id
+    ) const;
+
+    [[nodiscard]] double normalized_hand_pair_weight_sum() const;
+
+    [[nodiscard]] static bool is_real_player(
+        Player player
+    );
+
+    [[nodiscard]] static double utility_for_player(
+        double utility_p0,
+        Player player
+    );
 };
 
 } // namespace poker
