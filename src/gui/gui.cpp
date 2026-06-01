@@ -19,7 +19,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
-#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
@@ -43,7 +42,6 @@
 #include "holdem/betting_abstraction.hpp"
 #include "holdem/subgame_builder.hpp"
 #include "holdem/subgame_config.hpp"
-#include "holdem/street.hpp"
 #include "poker/board.hpp"
 #include "poker/hand.hpp"
 #include "poker/range.hpp"
@@ -60,10 +58,6 @@
 #include "utils/RangeData.hh"
 #include "utils/MemoryUtil.hh"
 
-static const std::vector<std::string> RANKS = {
-    "A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"};
-static const std::vector<char> SUITS = {'h', 'd', 'c', 's'};
-
 namespace {
 
 poker::Board make_board_from_labels(const std::vector<std::string>& labels) {
@@ -75,14 +69,6 @@ poker::Board make_board_from_labels(const std::vector<std::string>& labels) {
   return poker::Board{cards};
 }
 
-poker::holdem::Street street_from_board_size(std::size_t board_size) {
-  switch (board_size) {
-    case 3: return poker::holdem::Street::Flop;
-    case 4: return poker::holdem::Street::Turn;
-    case 5: return poker::holdem::Street::River;
-    default: throw std::invalid_argument("Board must contain 3, 4, or 5 cards.");
-  }
-}
 
 std::vector<phevaluator::Card> cards_of_suitless_rank(const char rank_char) {
   return {
@@ -109,7 +95,7 @@ poker::Range make_range_from_hand_labels(
 
   for (const std::string& raw : labels) {
     std::string h = raw;
-    h.erase(std::remove_if(h.begin(), h.end(), ::isspace), h.end());
+    std::erase_if(h, ::isspace);
     if (h.empty()) continue;
 
     // Exact combo: AhKh, AsAd, etc.
@@ -166,7 +152,7 @@ std::string hand_type_from_hole_cards(const poker::HoleCards& hand) {
     return std::string{hi, lo};
   }
 
-  const bool suited = r1 == r2;
+  const bool suited = hand.a.describeSuit() == hand.b.describeSuit();
   return std::string{hi} + std::string{lo} + (suited ? "s" : "o");
 }
 
@@ -174,35 +160,9 @@ std::string combo_label_from_hole_cards(const poker::HoleCards& hand) {
   return hand.a.describeCard() + hand.b.describeCard();
 }
 
-std::optional<int> extract_int_field(const std::string& key, const std::string& name) {
-  const std::string needle = "|" + name + "=";
-  std::size_t pos = key.find(needle);
-  if (pos == std::string::npos) {
-    if (key.rfind(name + "=", 0) == 0) {
-      pos = 0;
-    } else {
-      return std::nullopt;
-    }
-  } else {
-    pos += 1;
-  }
-  pos += name.size() + 1;
-  const std::size_t end = key.find('|', pos);
-  return std::stoi(key.substr(pos, end == std::string::npos ? std::string::npos : end - pos));
-}
-
-std::optional<poker::HoleCards> hand_from_infoset_key(const std::string& key) {
-  const auto id = extract_int_field(key, "hbucket");
-  if (!id || *id < 0 || *id >= poker::kNumHands) {
-    return std::nullopt;
-  }
-  return poker::hand_from_id(static_cast<poker::HandId>(*id));
-}
-
 std::string action_label(const poker::GameAction& action) {
   using poker::holdem::ActionType;
-  const ActionType type = static_cast<ActionType>(action.action_type);
-  switch (type) {
+  switch (static_cast<ActionType>(action.action_type)) {
     case ActionType::Fold: return "Fold";
     case ActionType::Check: return "Check";
     case ActionType::Call: return "Call " + std::to_string(action.amount);
@@ -215,8 +175,7 @@ std::string action_label(const poker::GameAction& action) {
 
 Fl_Color color_for_action(const poker::GameAction& action, int& bet_index) {
   using poker::holdem::ActionType;
-  const ActionType type = static_cast<ActionType>(action.action_type);
-  switch (type) {
+  switch (static_cast<ActionType>(action.action_type)) {
     case ActionType::Fold: return fl_rgb_color(91, 141, 238);
     case ActionType::Check:
     case ActionType::Call: return fl_rgb_color(94, 186, 125);
@@ -234,17 +193,25 @@ Fl_Color color_for_action(const poker::GameAction& action, int& bet_index) {
   return FL_GRAY;
 }
 
-bool node_is_public_chance(const poker::Game& game, int node_id) {
-  const poker::Node& node = game.node(node_id);
-  return node.player == poker::Player::Chance && node.id != game.root;
+const poker::HandDomain& acting_hand_domain(
+      const poker::Game& game,
+      poker::Player player
+  ) {
+  return game.hand_domain(player);
 }
 
-std::optional<std::string> dealt_board_card_from_action(const poker::GameAction& action) {
-  const std::string prefix = "deal_board:";
-  if (action.label.rfind(prefix, 0) != 0) return std::nullopt;
-  const std::string board = action.label.substr(prefix.size());
-  if (board.size() < 2) return std::nullopt;
-  return board.substr(board.size() - 2);
+poker::HandId hand_id_for_bucket(
+      const poker::Game& game,
+      poker::Player player,
+      int bucket
+) {
+  const poker::HandDomain& domain = acting_hand_domain(game, player);
+
+  if (bucket < 0 || bucket >= domain.hand_count()) {
+    throw std::out_of_range("hand bucket out of range");
+  }
+
+  return domain.hands[static_cast<std::size_t>(bucket)];
 }
 
 } // namespace
@@ -288,7 +255,6 @@ class Wizard : public Fl_Double_Window {
     int p1_wager;
     int p2_wager;
     std::vector<std::string> board;
-    std::string action_taken;
   };
   std::vector<GameState> m_history;
 
@@ -487,7 +453,6 @@ class Wizard : public Fl_Double_Window {
     const poker::Range villain_range = make_range_from_hand_labels(m_data.villainRange, board);
 
     poker::holdem::HoldemSubgameConfig config;
-    config.start_street = street_from_board_size(m_data.board.size());
     config.board = board;
     config.pot_size = m_data.startingPot;
     config.effective_stack = m_data.stackSize;
@@ -495,18 +460,16 @@ class Wizard : public Fl_Double_Window {
     config.p0_range = hero_range;
     config.p1_range = villain_range;
     config.betting_abstraction = make_gui_betting_abstraction();
-    config.expand_all_in_runouts = false;
     config.collapse_all_in_runouts_to_ev = true;
-    config.validate_tree_during_build = false;
-    config.reject_preflop = true;
 
     m_pg5->setStatus("Building native Hold'em subgame tree...");
     Fl::check();
 
     poker::Game built = poker::holdem::HoldemSubgameBuilder(config).build();
-    const std::size_t estimatedMemory = estimate_game_memory(built);
+    const poker::GameMemoryEstimate estimatedMemory = built.estimate_memory();
     const std::size_t availableMemory = MemoryUtil::getAvailableMemory();
-    m_pg5->setMemoryEstimate(estimatedMemory, availableMemory);
+
+    m_pg5->setMemoryEstimate( sizeof(poker::Game) + estimatedMemory.game_owned_capacity_bytes, availableMemory);
     Fl::check();
 
     if (!m_pg5->isMemoryOk()) {
@@ -514,105 +477,92 @@ class Wizard : public Fl_Double_Window {
           "Not enough memory for this solve. Try reducing range sizes or solving from a later street.");
     }
 
-    // m_pg5->setStatus("Training native CFR solver...");
-    // m_pg5->reset();
-    // Fl::check();
-    //
-    // const bool useGpu = std::string(m_pg1->getCFRRenderer()) == "GPU";
-    // if (useGpu) {
-    //   poker::GpuCfrConfig cfr_config;
-    //   cfr_config.num_players = 2;
-    //   cfr_config.synchronize_each_iteration = false;
-    //   cfr_config.threads_per_block = 512;
-    //   cfr_config.use_cfr_plus = false;
-    //   cfr_config.linear_averaging = false;
-    //
-    //   m_game = std::make_unique<poker::Game>(std::move(built));
-    //   poker::GpuCfrSolver solver(*m_game, cfr_config);
-    //
-    //   const int total = std::max<int>(0, m_data.iterations);
-    //   const int chunk = std::max<int>(1, total / 100);
-    //   for (int done = 0; done < total;) {
-    //     const int step = std::min<int>(chunk, total - done);
-    //     solver.run_iterations(step);
-    //     done += step;
-    //     m_pg5->setIteration(done, total);
-    //     m_pg5->setProgress(done, total);
-    //     Fl::check();
-    //   }
-    //
-    //   m_average_strategy = solver.average_strategy();
-    //
-    //   {
-    //     std::ofstream log("under_the_gun_gui_debug.log", std::ios::app);
-    //     log << "=== GUI native solve complete ===\n";
-    //     log << "Nodes: " << m_game->num_nodes() << "\n";
-    //     log << "Infosets: " << m_game->num_infosets() << "\n";
-    //     log << "Q entries: " << m_game->num_q() << "\n";
-    //     log << "Iterations: " << total << "\n";
-    //     log << "Board: ";
-    //     for (const auto& card : m_data.board) log << card << ' ';
-    //     log << "\n\n";
-    //   }
-    // } else {
-    //   poker::CfrConfig cfr_config;
-    //   cfr_config.num_players = 2;
-    //   cfr_config.use_cfr_plus = false;
-    //   cfr_config.linear_averaging = false;
-    //   cfr_config.simultaneous_updates = true;
-    //
-    //   m_game = std::make_unique<poker::Game>(std::move(built));
-    //   poker::CpuCfrSolver solver(*m_game, cfr_config);
-    //
-    //   const int total = std::max<int>(0, m_data.iterations);
-    //   const int chunk = std::max<int>(1, total / 100);
-    //   for (int done = 0; done < total;) {
-    //     const int step = std::min<int>(chunk, total - done);
-    //     solver.run_iterations(step);
-    //     done += step;
-    //     m_pg5->setIteration(done, total);
-    //     m_pg5->setProgress(done, total);
-    //     Fl::check();
-    //   }
-    //
-    //   m_average_strategy = solver.average_strategy();
-    //
-    //   {
-    //     std::ofstream log("under_the_gun_gui_debug.log", std::ios::app);
-    //     log << "=== GUI native solve complete ===\n";
-    //     log << "Nodes: " << m_game->num_nodes() << "\n";
-    //     log << "Infosets: " << m_game->num_infosets() << "\n";
-    //     log << "Q entries: " << m_game->num_q() << "\n";
-    //     log << "Iterations: " << total << "\n";
-    //     log << "Board: ";
-    //     for (const auto& card : m_data.board) log << card << ' ';
-    //     log << "\n\n";
-    //   }
-    // }
-    //
-    // reset_navigation_to_root_public_state();
-    // m_history.clear();
-    // m_overallStrategyCache.clear();
-    //
-    // m_pg5->hide();
-    // m_pg6->show();
-    // updateStrategyDisplay();
-    // Fl::check();
-  }
+    m_pg5->setStatus("Training native CFR solver...");
+    m_pg5->reset();
+    Fl::check();
 
-  static std::size_t estimate_game_memory(const poker::Game& game) {
-    std::size_t bytes = sizeof(poker::Game);
-    bytes += game.nodes.capacity() * sizeof(poker::Node);
-    bytes += game.infosets.capacity() * sizeof(poker::InfoSet);
-    bytes += game.q_entries.capacity() * sizeof(poker::InfoSetAction);
-    bytes += game.num_q() * sizeof(float) * 4;
-    for (const poker::Node& node : game.nodes) bytes += node.children.size() * sizeof(int);
-    for (const poker::InfoSet& infoset : game.infosets) {
-      bytes += infoset.actions.capacity() * sizeof(poker::GameAction);
-      bytes += infoset.q_indices.capacity() * sizeof(int);
-      bytes += infoset.key.capacity();
+    m_game = std::make_unique<poker::Game>(std::move(built));
+
+    const int total = std::max<int>(0, m_data.iterations);
+    const int chunk = std::max<int>(1, total / 100);
+
+    if (std::string(m_pg1->getCFRRenderer()) == "GPU") {
+        poker::GpuCfrConfig cfr_config;
+        cfr_config.num_players = 2;
+        cfr_config.synchronize_each_iteration = false;
+        cfr_config.threads_per_block = 512;
+        cfr_config.use_cfr_plus = false;
+        cfr_config.linear_averaging = false;
+        cfr_config.terminal_mode = poker::GpuTerminalMode::HostPrecomputed;
+
+        poker::GpuCfrSolver solver(*m_game, cfr_config);
+        for (int done = 0; done < total;) {
+            const int step = std::min<int>(chunk, total - done);
+
+            solver.run_iterations(step);
+
+            done += step;
+            m_pg5->setIteration(done, total);
+            m_pg5->setProgress(done, total);
+            Fl::check();
+        }
+
+        m_average_strategy = solver.average_strategy();
+    } else {
+        poker::CfrConfig cfr_config;
+        cfr_config.num_players = 2;
+        cfr_config.use_cfr_plus = false;
+        cfr_config.linear_averaging = false;
+        cfr_config.simultaneous_updates = true;
+
+        poker::TerminalValueProvider terminal_values;
+
+        poker::CpuCfrSolver solver(
+            *m_game,
+            terminal_values,
+            cfr_config
+        );
+
+        for (int done = 0; done < total;) {
+            const int step = std::min<int>(chunk, total - done);
+
+            solver.run_iterations(step);
+
+            done += step;
+            m_pg5->setIteration(done, total);
+            m_pg5->setProgress(done, total);
+            Fl::check();
+        }
+
+        m_average_strategy = solver.average_strategy();
     }
-    return bytes;
+
+    {
+        std::ofstream log("under_the_gun_gui_debug.log", std::ios::app);
+        log << "=== GUI native solve complete ===\n";
+        log << "Nodes: " << m_game->num_nodes() << "\n";
+        log << "Edges: " << m_game->num_edges() << "\n";
+        log << "Actions: " << m_game->num_actions() << "\n";
+        log << "Action states: " << m_game->num_action_states() << "\n";
+        log << "CFR tensor entries: " << m_game->cfr_tensor_entries() << "\n";
+        log << "State-bucket entries: " << m_game->state_bucket_entries() << "\n";
+        log << "Hand pairs: " << m_game->hand_pairs.pair_count() << "\n";
+        log << "Iterations: " << total << "\n";
+        log << "Board: ";
+        for (const auto& card : m_data.board) {
+            log << card << ' ';
+        }
+        log << "\n\n";
+    }
+
+    reset_navigation_to_root_public_state();
+    m_history.clear();
+    m_overallStrategyCache.clear();
+
+    m_pg5->hide();
+    m_pg6->show();
+    updateStrategyDisplay();
+    Fl::check();
   }
 
   void reset_navigation_to_root_public_state() {
@@ -620,35 +570,10 @@ class Wizard : public Fl_Double_Window {
     m_p1_stack = m_p2_stack = m_data.stackSize;
     m_p1_wager = m_p2_wager = 0;
     m_current_nodes.clear();
-
-    if (!m_game) return;
-
-    const poker::Node& root = m_game->node(m_game->root);
-    for (int child_id : root.children) {
-      m_current_nodes.push_back(child_id);
+    if (!m_game) {
+      return;
     }
-    normalize_current_nodes();
-  }
-
-  void normalize_current_nodes() {
-    if (!m_game) return;
-
-    bool changed = true;
-    while (changed) {
-      changed = false;
-      std::vector<int> next;
-      for (int node_id : m_current_nodes) {
-        const poker::Node& node = m_game->node(node_id);
-        // Private-deal chance nodes are only the root. Other chance nodes are public-card choices.
-        if (node.player == poker::Player::Chance && node.id == m_game->root) {
-          next.insert(next.end(), node.children.begin(), node.children.end());
-          changed = true;
-        } else {
-          next.push_back(node_id);
-        }
-      }
-      m_current_nodes = dedupe_nodes(next);
-    }
+    m_current_nodes.push_back(m_game->root);
   }
 
   std::vector<int> dedupe_nodes(const std::vector<int>& nodes) const {
@@ -662,11 +587,16 @@ class Wizard : public Fl_Double_Window {
 
   std::vector<int> current_action_nodes() const {
     std::vector<int> result;
-    if (!m_game) return result;
+    if (!m_game) {
+      return result;
+    }
     for (int node_id : m_current_nodes) {
-      const poker::Node& node = m_game->node(node_id);
-      if (node.player == poker::Player::P0 || node.player == poker::Player::P1) {
-        if (node.infoset >= 0 && !node.terminal) result.push_back(node_id);
+      const poker::PublicNode& node = m_game->node(node_id);
+      if (node.type == poker::PublicNodeType::Action &&
+          (node.player == poker::Player::P0 ||
+          node.player == poker::Player::P1) &&
+          node.action_state_index >= 0) {
+        result.push_back(node_id);
       }
     }
     return result;
@@ -674,32 +604,52 @@ class Wizard : public Fl_Double_Window {
 
   std::vector<int> current_chance_nodes() const {
     std::vector<int> result;
-    if (!m_game) return result;
-    for (int node_id : m_current_nodes) {
-      if (node_is_public_chance(*m_game, node_id)) result.push_back(node_id);
+
+    if (!m_game) {
+      return result;
     }
+
+    for (int node_id : m_current_nodes) {
+      const poker::PublicNode& node = m_game->node(node_id);
+
+      if (node.type == poker::PublicNodeType::Chance &&
+          node.player == poker::Player::Chance) {
+        result.push_back(node_id);
+      }
+    }
+
     return result;
   }
 
   bool current_is_terminal_only() const {
-    if (!m_game || m_current_nodes.empty()) return false;
-    for (int node_id : m_current_nodes) {
-      if (!m_game->node(node_id).terminal) return false;
+    if (!m_game || m_current_nodes.empty()) {
+      return false;
     }
+
+    for (int node_id : m_current_nodes) {
+      if (m_game->node(node_id).type != poker::PublicNodeType::Terminal) {
+        return false;
+      }
+    }
+
     return true;
   }
-
-  std::optional<poker::Player> current_player() const {
-    const auto nodes = current_action_nodes();
-    if (nodes.empty()) return std::nullopt;
-    return m_game->node(nodes.front()).player;
-  }
-
   std::vector<poker::GameAction> representative_actions() const {
     const auto nodes = current_action_nodes();
-    if (nodes.empty()) return {};
-    const poker::Node& node = m_game->node(nodes.front());
-    return m_game->infoset(node.infoset).actions;
+    if (nodes.empty() || !m_game) {
+      return {};
+    }
+    const poker::PublicNode& node = m_game->node(nodes.front());
+    if (node.action_state_index < 0) {
+      return {};
+    }
+    const poker::ActionState& state = m_game->action_state(node.action_state_index);
+    std::vector<poker::GameAction> result;
+    result.reserve(static_cast<std::size_t>(state.action_count));
+    for (int a = 0; a < state.action_count; ++a) {
+      result.push_back(m_game->action(state.first_action + a));
+    }
+    return result;
   }
 
   void updatePotAndStacks(const poker::GameAction &action, poker::Player player) {
@@ -778,11 +728,14 @@ class Wizard : public Fl_Double_Window {
       m_pg6->setActions({});
 
       std::set<std::string> available;
+
       for (int node_id : chance_nodes) {
-        const poker::Node& chance = m_game->node(node_id);
-        for (int child_id : chance.children) {
-          const auto label = dealt_board_card_from_action(m_game->node(child_id).incoming_action);
-          if (label) available.insert(*label);
+        const poker::PublicNode& chance = m_game->node(node_id);
+        for (int e = 0; e < chance.edge_count; ++e) {
+          if (const poker::NodeEdge& edge = m_game->edge(chance.first_edge + e); edge.public_card >= 0) {
+            const phevaluator::Card card(edge.public_card);
+            available.insert(card.describeCard());
+          }
         }
       }
       m_pg6->populateCardChoices(std::vector<std::string>(available.begin(), available.end()));
@@ -792,46 +745,58 @@ class Wizard : public Fl_Double_Window {
     }
 
     const auto action_nodes = current_action_nodes();
-    if (action_nodes.empty()) return;
-
+    if (action_nodes.empty()) {
+        return;
+    }
     const poker::Player player = m_game->node(action_nodes.front()).player;
-    m_pg6->setTitle(player == poker::Player::P0 ? "Hero's Turn" : "Villain's Turn");
-    set_common_strategy_header();
+    m_pg6->setTitle(
+        player == poker::Player::P0
+            ? "Hero's Turn"
+            : "Villain's Turn"
+    );
 
+    set_common_strategy_header();
     const auto actions = representative_actions();
     std::map<std::string, std::vector<float>> handTypeStrategies;
     std::map<std::string, int> handTypeCounts;
-
     for (int node_id : action_nodes) {
-      const poker::Node& node = m_game->node(node_id);
-      const poker::InfoSet& infoset = m_game->infoset(node.infoset);
-      const auto maybe_hand = hand_from_infoset_key(infoset.key);
-      if (!maybe_hand) continue;
-      const std::string hand_type = hand_type_from_hole_cards(*maybe_hand);
-
-      if (!handTypeStrategies.count(hand_type)) {
-        handTypeStrategies[hand_type] = std::vector<float>(actions.size(), 0.0f);
-        handTypeCounts[hand_type] = 0;
-      }
-
-      for (std::size_t a = 0; a < actions.size() && a < infoset.q_indices.size(); ++a) {
-        const int q = infoset.q_indices[a];
-        if (q >= 0 && q < static_cast<int>(m_average_strategy.size())) {
-          handTypeStrategies[hand_type][a] += m_average_strategy[q];
+        const poker::PublicNode& node = m_game->node(node_id);
+        if (node.action_state_index < 0) {
+            continue;
         }
-      }
-      handTypeCounts[hand_type]++;
+        const poker::ActionState& state = m_game->action_state(node.action_state_index);
+        for (int bucket = 0; bucket < state.bucket_count; ++bucket) {
+            const poker::HandId hand_id = hand_id_for_bucket(*m_game, player, bucket);
+            const poker::HoleCards hand = poker::hand_from_id(hand_id);
+
+            const std::string hand_type = hand_type_from_hole_cards(hand);
+            if (!handTypeStrategies.count(hand_type)) {
+                handTypeStrategies[hand_type] = std::vector<float>(actions.size(), 0.0f);
+                handTypeCounts[hand_type] = 0;
+            }
+
+            for (int a = 0; a < state.action_count; ++a) {
+                const std::size_t idx = state.tensor_index(bucket, a);
+
+                if (idx < m_average_strategy.size()) {
+                    handTypeStrategies[hand_type][static_cast<std::size_t>(a)] += m_average_strategy[idx];
+                }
+            }
+            ++handTypeCounts[hand_type];
+        }
     }
 
     std::map<std::string, std::map<std::string, float>> strategyMap;
-    for (const auto &[hand, stratVec] : handTypeStrategies) {
-      const int count = std::max<int>(1, handTypeCounts[hand]);
-      std::map<std::string, float> actionProbs;
-      for (std::size_t i = 0; i < actions.size(); ++i) {
-        const float prob = stratVec[i] / static_cast<float>(count);
-        if (prob > 0.001f) actionProbs[action_label(actions[i])] = prob;
-      }
-      strategyMap[hand] = actionProbs;
+    for (const auto& [hand, stratVec] : handTypeStrategies) {
+        const int count = std::max<int>(1, handTypeCounts[hand]);
+        std::map<std::string, float> actionProbs;
+        for (std::size_t i = 0; i < actions.size(); ++i) {
+            const float prob = stratVec[i] / static_cast<float>(count);
+            if (prob > 0.001f) {
+                actionProbs[action_label(actions[i])] = prob;
+            }
+        }
+        strategyMap[hand] = actionProbs;
     }
 
     m_pg6->updateStrategyGrid(strategyMap);
@@ -841,38 +806,71 @@ class Wizard : public Fl_Double_Window {
     m_pg6->deselectHand();
 
     std::vector<std::string> actionLabels;
-    for (const auto& action : actions) actionLabels.push_back(action_label(action));
+
+    for (const auto& action : actions) {
+        actionLabels.push_back(action_label(action));
+    }
     m_pg6->setActions(actionLabels);
   }
 
-  void doAction(const std::string &actionStr) {
-    if (!m_game) return;
+  void doAction(const std::string& actionStr) {
+    if (!m_game) {
+      return;
+    }
+
     const auto action_nodes = current_action_nodes();
-    if (action_nodes.empty()) return;
+
+    if (action_nodes.empty()) {
+      return;
+    }
 
     const auto actions = representative_actions();
+
     int action_idx = -1;
+
     for (std::size_t i = 0; i < actions.size(); ++i) {
       if (action_label(actions[i]) == actionStr) {
         action_idx = static_cast<int>(i);
         break;
       }
     }
-    if (action_idx < 0) return;
 
-    GameState state{m_current_nodes, m_p1_stack, m_p2_stack, m_current_pot,
-                    m_p1_wager, m_p2_wager, m_data.board, actionStr};
+    if (action_idx < 0) {
+      return;
+    }
+
+    GameState state{
+      m_current_nodes,
+      m_p1_stack,
+      m_p2_stack,
+      m_current_pot,
+      m_p1_wager,
+      m_p2_wager,
+      m_data.board
+  };
+
     m_history.push_back(state);
 
-    updatePotAndStacks(actions[action_idx], m_game->node(action_nodes.front()).player);
+    updatePotAndStacks(
+        actions[static_cast<std::size_t>(action_idx)],
+        m_game->node(action_nodes.front()).player
+    );
 
     std::vector<int> next;
+
     for (int node_id : action_nodes) {
-      const poker::Node& node = m_game->node(node_id);
-      if (action_idx < static_cast<int>(node.children.size())) {
-        next.push_back(node.children[action_idx]);
+      const poker::PublicNode& node = m_game->node(node_id);
+
+      for (int e = 0; e < node.edge_count; ++e) {
+        const poker::NodeEdge& edge =
+            m_game->edge(node.first_edge + e);
+
+        if (edge.local_action == action_idx) {
+          next.push_back(edge.child);
+        }
       }
     }
+
     m_current_nodes = dedupe_nodes(next);
     updateStrategyDisplay();
   }
@@ -888,21 +886,44 @@ class Wizard : public Fl_Double_Window {
     m_pg4->show();
   }
 
-  void doCardSelected(const std::string &cardStr) {
-    if (!m_game) return;
-    const auto chance_nodes = current_chance_nodes();
-    if (chance_nodes.empty()) return;
+  void doCardSelected(const std::string& cardStr) {
+    if (!m_game) {
+      return;
+    }
 
-    GameState state{m_current_nodes, m_p1_stack, m_p2_stack, m_current_pot,
-                    m_p1_wager, m_p2_wager, m_data.board, "card:" + cardStr};
+    const auto chance_nodes = current_chance_nodes();
+
+    if (chance_nodes.empty()) {
+      return;
+    }
+
+    const phevaluator::Card selected_card(cardStr);
+    const int selected_id = static_cast<int>(selected_card);
+
+    GameState state{
+      m_current_nodes,
+      m_p1_stack,
+      m_p2_stack,
+      m_current_pot,
+      m_p1_wager,
+      m_p2_wager,
+      m_data.board
+  };
+
     m_history.push_back(state);
 
     std::vector<int> next;
+
     for (int node_id : chance_nodes) {
-      const poker::Node& chance = m_game->node(node_id);
-      for (int child_id : chance.children) {
-        const auto dealt = dealt_board_card_from_action(m_game->node(child_id).incoming_action);
-        if (dealt && *dealt == cardStr) next.push_back(child_id);
+      const poker::PublicNode& chance = m_game->node(node_id);
+
+      for (int e = 0; e < chance.edge_count; ++e) {
+        const poker::NodeEdge& edge =
+            m_game->edge(chance.first_edge + e);
+
+        if (edge.public_card == selected_id) {
+          next.push_back(edge.child);
+        }
       }
     }
 
@@ -913,6 +934,7 @@ class Wizard : public Fl_Double_Window {
 
     m_data.board.push_back(cardStr);
     m_current_nodes = dedupe_nodes(next);
+
     updateStrategyDisplay();
   }
 
@@ -931,67 +953,84 @@ class Wizard : public Fl_Double_Window {
     updateStrategyDisplay();
   }
 
-  void handleHandSelect(const std::string& hand) {
+void handleHandSelect(const std::string& hand) {
     if (!m_game) {
         return;
     }
+
     const auto action_nodes = current_action_nodes();
+
     if (action_nodes.empty()) {
         return;
     }
+
     const auto actions = representative_actions();
+
     if (actions.empty()) {
         showOverallStrategyWithHeader("No actions available");
         return;
     }
+
+    const poker::Player player =
+        m_game->node(action_nodes.front()).player;
+
     std::vector<Fl_Color> actionColors;
     actionColors.reserve(actions.size());
+
     int betIndex = 0;
+
     for (const auto& action : actions) {
         actionColors.push_back(color_for_action(action, betIndex));
     }
+
     std::map<std::string, std::vector<double>> combo_action_sum;
     std::map<std::string, int> combo_count;
+
     for (int node_id : action_nodes) {
-        const poker::Node& node = m_game->node(node_id);
+        const poker::PublicNode& node = m_game->node(node_id);
 
-        if (node.infoset < 0) {
+        if (node.action_state_index < 0) {
             continue;
         }
 
-        const poker::InfoSet& infoset = m_game->infoset(node.infoset);
+        const poker::ActionState& state =
+            m_game->action_state(node.action_state_index);
 
-        const auto maybe_hand = hand_from_infoset_key(infoset.key);
-        if (!maybe_hand) {
-            continue;
+        for (int bucket = 0; bucket < state.bucket_count; ++bucket) {
+            const poker::HandId hand_id =
+                hand_id_for_bucket(*m_game, player, bucket);
+
+            const poker::HoleCards hole =
+                poker::hand_from_id(hand_id);
+
+            if (hand_type_from_hole_cards(hole) != hand) {
+                continue;
+            }
+
+            const std::string combo_label =
+                combo_label_from_hole_cards(hole);
+
+            auto& sums = combo_action_sum[combo_label];
+
+            if (sums.empty()) {
+                sums.assign(actions.size(), 0.0);
+            }
+
+            for (int a = 0; a < state.action_count; ++a) {
+                const std::size_t idx =
+                    state.tensor_index(bucket, a);
+
+                const float prob =
+                    idx < m_average_strategy.size()
+                        ? m_average_strategy[idx]
+                        : 0.0f;
+
+                sums[static_cast<std::size_t>(a)] +=
+                    static_cast<double>(prob);
+            }
+
+            ++combo_count[combo_label];
         }
-
-        if (hand_type_from_hole_cards(*maybe_hand) != hand) {
-            continue;
-        }
-
-        const std::string combo_label =
-            combo_label_from_hole_cards(*maybe_hand);
-
-        auto& sums = combo_action_sum[combo_label];
-        if (sums.empty()) {
-            sums.assign(actions.size(), 0.0);
-        }
-
-        for (std::size_t a = 0;
-             a < actions.size() && a < infoset.q_indices.size();
-             ++a) {
-            const int q = infoset.q_indices[a];
-
-            const float prob =
-                (q >= 0 && q < static_cast<int>(m_average_strategy.size()))
-                    ? m_average_strategy[q]
-                    : 0.0f;
-
-            sums[a] += static_cast<double>(prob);
-        }
-
-        combo_count[combo_label] += 1;
     }
 
     std::vector<ComboStrategyDisplay::ComboStrategy> combos;
@@ -1002,6 +1041,7 @@ class Wizard : public Fl_Double_Window {
         const std::vector<double>& sums = entry.second;
 
         const auto count_it = combo_count.find(combo_label);
+
         if (count_it == combo_count.end() || count_it->second <= 0) {
             continue;
         }
@@ -1011,9 +1051,13 @@ class Wizard : public Fl_Double_Window {
         ComboStrategyDisplay::ComboStrategy comboStrat;
         comboStrat.combo = combo_label;
 
-        for (std::size_t a = 0; a < actions.size() && a < sums.size(); ++a) {
+        for (std::size_t a = 0;
+             a < actions.size() && a < sums.size();
+             ++a) {
             const float prob =
-                static_cast<float>(sums[a] / static_cast<double>(count));
+                static_cast<float>(
+                    sums[a] / static_cast<double>(count)
+                );
 
             if (prob <= 0.001f) {
                 continue;
@@ -1039,26 +1083,56 @@ class Wizard : public Fl_Double_Window {
 
     m_pg6->setComboStrategies(hand, combos);
 }
-
   std::string generateRangeString() {
-    if (!m_game) return "";
+    if (!m_game) {
+      return "";
+    }
+
     const auto action_nodes = current_action_nodes();
-    if (action_nodes.empty()) return "";
+
+    if (action_nodes.empty()) {
+      return "";
+    }
+
+    const poker::Player player =
+        m_game->node(action_nodes.front()).player;
 
     std::set<std::string> handTypes;
+
     for (int node_id : action_nodes) {
-      const poker::InfoSet& infoset = m_game->infoset(m_game->node(node_id).infoset);
-      const auto maybe_hand = hand_from_infoset_key(infoset.key);
-      if (maybe_hand) handTypes.insert(hand_type_from_hole_cards(*maybe_hand));
+      const poker::PublicNode& node = m_game->node(node_id);
+
+      if (node.action_state_index < 0) {
+        continue;
+      }
+
+      const poker::ActionState& state =
+          m_game->action_state(node.action_state_index);
+
+      for (int bucket = 0; bucket < state.bucket_count; ++bucket) {
+        const poker::HandId hand_id =
+            hand_id_for_bucket(*m_game, player, bucket);
+
+        handTypes.insert(
+            hand_type_from_hole_cards(
+                poker::hand_from_id(hand_id)
+            )
+        );
+      }
     }
 
     std::stringstream result;
     bool first = true;
+
     for (const auto& hand : handTypes) {
-      if (!first) result << ",";
+      if (!first) {
+        result << ",";
+      }
+
       first = false;
       result << hand;
     }
+
     return result.str();
   }
 
@@ -1093,49 +1167,80 @@ class Wizard : public Fl_Double_Window {
   }
 
   void computeAndCacheOverallStrategy(const std::string& key) {
-    if (!m_game) return;
-    const auto action_nodes = current_action_nodes();
-    const auto actions = representative_actions();
-    if (action_nodes.empty() || actions.empty()) return;
-
-    std::vector<float> overallProbs(actions.size(), 0.0f);
-    int validInfosets = 0;
-
-    for (int node_id : action_nodes) {
-      const poker::InfoSet& infoset = m_game->infoset(m_game->node(node_id).infoset);
-      for (std::size_t a = 0; a < actions.size() && a < infoset.q_indices.size(); ++a) {
-        const int q = infoset.q_indices[a];
-        if (q >= 0 && q < static_cast<int>(m_average_strategy.size())) overallProbs[a] += m_average_strategy[q];
-      }
-      ++validInfosets;
+    if (!m_game) {
+        return;
     }
 
-    if (validInfosets > 0) {
-      for (float& p : overallProbs) p /= static_cast<float>(validInfosets);
+    const auto action_nodes = current_action_nodes();
+    const auto actions = representative_actions();
+
+    if (action_nodes.empty() || actions.empty()) {
+        return;
+    }
+
+    std::vector<float> overallProbs(actions.size(), 0.0f);
+    int validBuckets = 0;
+
+    for (int node_id : action_nodes) {
+        const poker::PublicNode& node = m_game->node(node_id);
+
+        if (node.action_state_index < 0) {
+            continue;
+        }
+
+        const poker::ActionState& state =
+            m_game->action_state(node.action_state_index);
+
+        for (int bucket = 0; bucket < state.bucket_count; ++bucket) {
+            for (int a = 0; a < state.action_count; ++a) {
+                const std::size_t idx =
+                    state.tensor_index(bucket, a);
+
+                if (idx < m_average_strategy.size()) {
+                    overallProbs[static_cast<std::size_t>(a)] +=
+                        m_average_strategy[idx];
+                }
+            }
+
+            ++validBuckets;
+        }
+    }
+
+    if (validBuckets > 0) {
+        for (float& p : overallProbs) {
+            p /= static_cast<float>(validBuckets);
+        }
     }
 
     std::vector<Fl_Color> actionColors;
     int betIndex = 0;
-    for (const auto &action : actions) actionColors.push_back(color_for_action(action, betIndex));
+
+    for (const auto& action : actions) {
+        actionColors.push_back(color_for_action(action, betIndex));
+    }
 
     std::vector<ComboStrategyDisplay::ComboStrategy> overall;
+
     ComboStrategyDisplay::ComboStrategy overallStrat;
     overallStrat.combo = "Range Average";
 
     for (std::size_t a = 0; a < actions.size(); ++a) {
-      if (overallProbs[a] > 0.001f) {
-        ComboStrategyDisplay::ActionProb ap;
-        ap.name = action_label(actions[a]);
-        ap.prob = overallProbs[a];
-        ap.color = actionColors[a];
-        overallStrat.actions.push_back(ap);
-      }
+        if (overallProbs[a] > 0.001f) {
+            ComboStrategyDisplay::ActionProb ap;
+            ap.name = action_label(actions[a]);
+            ap.prob = overallProbs[a];
+            ap.color = actionColors[a];
+
+            overallStrat.actions.push_back(ap);
+        }
     }
 
-    if (!overallStrat.actions.empty()) overall.push_back(overallStrat);
-    m_overallStrategyCache[key] = overall;
-  }
+    if (!overallStrat.actions.empty()) {
+        overall.push_back(overallStrat);
+    }
 
+    m_overallStrategyCache[key] = overall;
+}
 public:
   Wizard(const char *L = 0) : Fl_Double_Window(100, 100, L) { init(); }
 

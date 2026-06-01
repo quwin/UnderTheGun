@@ -42,7 +42,7 @@ public:
 
   void setNextCallback(Fl_Callback *cb, void *data) const;
   void stopAnimation();  // Call when page becomes hidden
-
+  ~Page1_Settings();
   // Validation - returns empty string if valid, error message if invalid
   std::string validateInputs() const;
 

@@ -19,7 +19,6 @@ poker::Board make_test_board() {
             phevaluator::Card("As"),
             phevaluator::Card("7h"),
             phevaluator::Card("Jh"),
-            phevaluator::Card("Ts"),
         }
     };
 }
@@ -73,18 +72,13 @@ poker::Board make_test_board() {
 poker::holdem::HoldemSubgameConfig make_test_config() {
     poker::holdem::HoldemSubgameConfig config;
 
-    config.start_street = poker::holdem::Street::Turn;
     config.board = make_test_board();
-    config.pot_size = 1000;
-    config.effective_stack = 20000;
+    config.pot_size = 100;
+    config.effective_stack = 2000;
     config.player_to_act = poker::Player::P0;
-
     config.collapse_all_in_runouts_to_ev = true;
-    config.validate_tree_during_build = false;
-
     config.p0_range = make_tiny_p0_range();
     config.p1_range = make_tiny_p1_range();
-
     config.betting_abstraction = poker::holdem::make_standard_abstraction();
 
     return config;
@@ -120,7 +114,9 @@ BenchResult run_cpu_benchmark(
     const poker::Game& game,
     int iterations
 ) {
-    poker::CpuCfrSolver solver(game);
+    const poker::CfrConfig config;
+    const poker::TerminalValueProvider terminal_values;
+    poker::CpuCfrSolver solver(game,terminal_values, config);
 
     const auto t0 = Clock::now();
     solver.run_iterations(iterations);
@@ -140,12 +136,9 @@ BenchResult run_gpu_benchmark(
 ) {
     poker::GpuCfrConfig config;
     config.synchronize_each_iteration = false; // true only while debugging
-
     poker::GpuCfrSolver solver(game, config);
-
     const auto t0 = Clock::now();
     solver.run_iterations(iterations);
-
     // average_strategy() performs a device-to-host copy, forcing completion.
     std::vector<float> avg = solver.average_strategy();
 
@@ -171,24 +164,23 @@ void print_result(const BenchResult& r) {
 
 int main() {
     try {
-        constexpr int iterations = 1;
+        constexpr int iterations = 100;
 
-        poker::holdem::HoldemSubgameConfig config = make_test_config();
-
+        const poker::holdem::HoldemSubgameConfig config = make_test_config();
         const poker::Game game = poker::holdem::HoldemSubgameBuilder(config).build();
-
+        game.print_game_memory_usage();
         std::cout << "Benchmarking " << iterations << " CFR iterations\n";
-        std::cout << "Nodes: " << game.num_nodes()
-                  << " Infosets: " << game.num_infosets()
-                  << " Q: " << game.num_q() << "\n";
-
-        const BenchResult cpu = run_cpu_benchmark(game, iterations);
-        print_result(cpu);
+        std::cout << "Nodes: " << game.num_nodes() << "\n";
 
         const BenchResult gpu = run_gpu_benchmark(game, iterations);
         print_result(gpu);
-        std::cout << "GPU speed relative to CPU: " << cpu.seconds / gpu.seconds << "x\n";
-        std::cout << "Max avg-strategy abs diff: " << max_abs_diff(cpu.avg_strategy, gpu.avg_strategy) << std::endl;
+
+        // const BenchResult cpu = run_cpu_benchmark(game, iterations);
+        // print_result(cpu);
+
+
+        // std::cout << "GPU speed relative to CPU: " << cpu.seconds / gpu.seconds << "x\n";
+        // std::cout << "Max avg-strategy abs diff: " << max_abs_diff(cpu.avg_strategy, gpu.avg_strategy) << std::endl;
 
         return 0;
     } catch (const std::exception& e) {

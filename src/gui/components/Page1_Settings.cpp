@@ -8,9 +8,18 @@
 #include <algorithm>
 #include <string>
 
+Page1_Settings::~Page1_Settings() {
+  Fl::remove_timeout(logoAnimCallback, this);
+
+  delete m_logoScaled;
+  m_logoScaled = nullptr;
+
+  delete m_logoImage;
+  m_logoImage = nullptr;
+}
+
 Page1_Settings::Page1_Settings(int X, int Y, int W, int H)
     : Fl_Group(X, Y, W, H) {
-
   m_grid = new Fl_Grid(X, Y, W, H);
   m_grid->layout(11, 5, 10, 10);  // 11 rows, 5 columns (left spacer + gap), 10px margins
 

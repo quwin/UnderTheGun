@@ -51,7 +51,12 @@ Page6_Strategy::Page6_Strategy(int X, int Y, int W, int H)
 }
 
 Page6_Strategy::~Page6_Strategy() {
+  if (m_infoDisplay) {
+    m_infoDisplay->buffer(nullptr);
+  }
+
   delete m_infoBuffer;
+  m_infoBuffer = nullptr;
 }
 
 std::string Page6_Strategy::getHandLabel(int row, int col) {
