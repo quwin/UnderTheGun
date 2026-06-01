@@ -44,7 +44,7 @@ Page5_Progress::Page5_Progress(int X, int Y, int W, int H)
   end();
 }
 
-void Page5_Progress::setMemoryEstimate(size_t treeBytes, size_t availableBytes) {
+void Page5_Progress::setMemoryEstimate(const size_t treeBytes, const size_t availableBytes) {
   m_treeMemory = treeBytes;
   m_availableMemory = availableBytes;
   m_memoryOk = (treeBytes < availableBytes * 0.9);  // 90% safety margin
