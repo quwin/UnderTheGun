@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../../external/PokerHandEvaluator/cpp/include/phevaluator/card.h"
-#include "poker/deck_mask.hpp"
+#include "deck_mask.hpp"
 
 #include <array>
 #include <cstdint>

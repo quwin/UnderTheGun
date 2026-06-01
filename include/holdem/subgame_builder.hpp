@@ -1,6 +1,6 @@
 #pragma once
 
-#include "game.hpp"
+#include "../game.hpp"
 #include "betting_engine.hpp"
 #include "public_state.hpp"
 #include "subgame_config.hpp"

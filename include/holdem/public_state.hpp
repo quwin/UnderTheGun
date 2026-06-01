@@ -1,9 +1,9 @@
 #pragma once
 
-#include "game.hpp"
+#include "../game.hpp"
 #include "action.hpp"
 #include "betting_state.hpp"
-#include "poker/board.hpp"
+#include "../poker/board.hpp"
 #include <stdexcept>
 
 namespace poker::holdem {

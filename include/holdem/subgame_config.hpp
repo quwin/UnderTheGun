@@ -1,6 +1,6 @@
 #pragma once
 
-#include "game.hpp"
+#include "../game.hpp"
 
 #include "betting_abstraction.hpp"
 #include "board_abstraction.hpp"

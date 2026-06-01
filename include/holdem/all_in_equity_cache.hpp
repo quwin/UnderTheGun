@@ -213,8 +213,8 @@ private:
             board.cards[3],
             board.cards[4]
         );
-        // Smaller value is stronger, from 1 to 7462
-        if (p0_rank < p1_rank) {
+        // Smaller value is weaker, from 1 to 7462
+        if (p0_rank > p1_rank) {
             return 1.0;
         }
         if (p1_rank == p0_rank) {
@@ -265,8 +265,8 @@ private:
                     river_board.cards[3],
                     river_board.cards[4]
                 );
-                // Smaller value is stronger, from 1 to 7462
-                if (p0_rank < p1_rank) {
+                // Smaller value is weaker, from 1 to 7462
+                if (p0_rank > p1_rank) {
                     score += 1.0;
                 } else if (p1_rank == p0_rank) {
                     score += 0.5;
@@ -299,7 +299,7 @@ private:
                         river_board.cards[4]
                     );
                     // Smaller value is stronger, from 1 to 7462
-                    if (p0_rank < p1_rank) {
+                    if (p0_rank > p1_rank) {
                         score += 1.0;
                     } else if (p1_rank == p0_rank) {
                         score += 0.5;
