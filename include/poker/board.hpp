@@ -1,8 +1,6 @@
 #pragma once
 
-#include "card.hpp"
 #include "deck_mask.hpp"
-
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -11,11 +9,12 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "../../external/PokerHandEvaluator/cpp/include/phevaluator/card.h"
 
 namespace poker {
 
 enum class BoardStreet : int {
-    Empty = 0,
+    PreFlop = 0,
     Flop  = 3,
     Turn  = 4,
     River = 5
@@ -31,43 +30,35 @@ struct Board {
     //   Board{{card1, card2, card3}}
     //   Board{{card1, card2, card3, card4}}
     //   Board{{card1, card2, card3, card4, card5}}
-    std::vector<CardId> cards;
+    std::vector<phevaluator::Card> cards;
 
     Board() = default;
-
-    explicit Board(std::vector<CardId> input)
+    explicit Board(std::vector<phevaluator::Card> input)
         : cards(std::move(input)) {
         validate();
     }
-
-    Board(std::initializer_list<CardId> input)
+    Board(std::initializer_list<phevaluator::Card> input)
         : cards(input) {
         validate();
     }
-
-    int size() const {
+    [[nodiscard]] int size() const {
         return static_cast<int>(cards.size());
     }
-
-    bool empty() const {
+    [[nodiscard]] bool empty() const {
         return cards.empty();
     }
-
-    bool is_flop() const {
+    [[nodiscard]] bool is_flop() const {
         return cards.size() == 3;
     }
-
-    bool is_turn() const {
+    [[nodiscard]] bool is_turn() const {
         return cards.size() == 4;
     }
-
-    bool is_river() const {
+    [[nodiscard]] bool is_river() const {
         return cards.size() == 5;
     }
-
-    BoardStreet street() const {
+    [[nodiscard]] BoardStreet street() const {
         switch (cards.size()) {
-            case 0: return BoardStreet::Empty;
+            case 0: return BoardStreet::PreFlop;
             case 3: return BoardStreet::Flop;
             case 4: return BoardStreet::Turn;
             case 5: return BoardStreet::River;
@@ -75,30 +66,23 @@ struct Board {
                 throw std::logic_error("Invalid board size for Hold'em street.");
         }
     }
-
-    CardId operator[](std::size_t index) const {
+    phevaluator::Card operator[](std::size_t index) const {
         return cards.at(index);
     }
-
-    CardId& operator[](std::size_t index) {
+    phevaluator::Card& operator[](std::size_t index) {
         return cards.at(index);
     }
-
-    bool contains(CardId card) const {
+    [[nodiscard]] bool contains(phevaluator::Card card) const {
         return std::find(cards.begin(), cards.end(), card) != cards.end();
     }
-
     DeckMask mask() const {
         DeckMask result = empty_deck_mask();
-
-        for (CardId card : cards) {
+        for (phevaluator::Card card : cards) {
             result = add_card(result, card);
         }
-
         return result;
     }
-
-    Board with_added_card(CardId card) const {
+    Board with_added_card(phevaluator::Card card) const {
         if (cards.size() >= 5) {
             throw std::invalid_argument("Cannot add card to a complete river board.");
         }
@@ -114,9 +98,8 @@ struct Board {
 
         return next;
     }
-
     void validate() const {
-        if (!(cards.size() == 0 ||
+        if (!(cards.empty() ||
               cards.size() == 3 ||
               cards.size() == 4 ||
               cards.size() == 5)) {
@@ -124,12 +107,8 @@ struct Board {
                 "Board must contain 0, 3, 4, or 5 cards."
             );
         }
-
         DeckMask seen = empty_deck_mask();
-
-        for (CardId card : cards) {
-            validate_card(card);
-
+        for (phevaluator::Card card : cards) {
             if (contains_card(seen, card)) {
                 throw std::invalid_argument("Board contains duplicate card.");
             }
@@ -151,17 +130,17 @@ inline DeckMask board_mask(const Board& board) {
     return board.mask();
 }
 
-inline bool board_contains(const Board& board, CardId card) {
+inline bool board_contains(const Board& board, phevaluator::Card card) {
     return board.contains(card);
 }
 
-inline Board add_board_card(const Board& board, CardId card) {
+inline Board add_board_card(const Board& board, phevaluator::Card card) {
     return board.with_added_card(card);
 }
 
 inline std::string to_string(BoardStreet street) {
     switch (street) {
-        case BoardStreet::Empty: return "Empty";
+        case BoardStreet::PreFlop: return "Empty";
         case BoardStreet::Flop:  return "Flop";
         case BoardStreet::Turn:  return "Turn";
         case BoardStreet::River: return "River";
@@ -178,7 +157,7 @@ inline std::string to_string(const Board& board) {
             result += " ";
         }
 
-        result += to_string(board.cards[i]);
+        result += board.cards[i].describeCard();
     }
 
     return result;

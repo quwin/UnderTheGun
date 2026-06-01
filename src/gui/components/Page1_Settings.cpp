@@ -8,9 +8,18 @@
 #include <algorithm>
 #include <string>
 
+Page1_Settings::~Page1_Settings() {
+  Fl::remove_timeout(logoAnimCallback, this);
+
+  delete m_logoScaled;
+  m_logoScaled = nullptr;
+
+  delete m_logoImage;
+  m_logoImage = nullptr;
+}
+
 Page1_Settings::Page1_Settings(int X, int Y, int W, int H)
     : Fl_Group(X, Y, W, H) {
-
   m_grid = new Fl_Grid(X, Y, W, H);
   m_grid->layout(11, 5, 10, 10);  // 11 rows, 5 columns (left spacer + gap), 10px margins
 
@@ -149,7 +158,7 @@ Page1_Settings::Page1_Settings(int X, int Y, int W, int H)
 
   m_choCFRRenderer = new Fl_Choice(0, 0, 0, 0);
   m_choCFRRenderer->textsize(24);
-  m_choCFRRenderer->add("CPU|GPU");
+  m_choCFRRenderer->add("GPU|CPU");
   m_choCFRRenderer->value(0);
   m_grid->widget(m_choCFRRenderer, 10, 2);
 

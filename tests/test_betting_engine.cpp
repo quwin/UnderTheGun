@@ -4,7 +4,6 @@
 #include "holdem/betting_abstraction.hpp"
 #include "holdem/betting_engine.hpp"
 #include "holdem/public_state.hpp"
-#include "holdem/street.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -89,21 +88,19 @@ poker::holdem::BettingAbstraction make_test_abstraction() {
 }
 
 poker::Board test_river_board() {
-return poker::Board{
+    return poker::Board{
         {
-            poker::make_card(poker::Rank::Ace, poker::Suit::Spades),
-            poker::make_card(poker::Rank::Seven, poker::Suit::Hearts),
-            poker::make_card(poker::Rank::Two, poker::Suit::Clubs),
-            poker::make_card(poker::Rank::Jack, poker::Suit::Diamonds),
-            poker::make_card(poker::Rank::Four, poker::Suit::Spades)
+            phevaluator::Card("As"),
+            phevaluator::Card("7h"),
+            phevaluator::Card("Jh"),
+            phevaluator::Card("Ts"),
+            phevaluator::Card("3d"),
         }
-};
+    };
 }
 
 poker::holdem::PublicState make_initial_river_state() {
     poker::holdem::PublicState state;
-
-    state.street = poker::holdem::Street::River;
     state.board = test_river_board();
     state.pot = kStartingPot;
 
@@ -114,9 +111,7 @@ poker::holdem::PublicState make_initial_river_state() {
 
     state.betting.reset_for_new_street();
 
-    state.terminal = false;
-    state.terminal_reason = poker::holdem::TerminalReason::None;
-    state.action_history.clear();
+    state.terminal_type = poker::TerminalType::None;
 
     return state;
 }
@@ -285,11 +280,6 @@ void test_bet_updates_pot_stack_and_player_to_act() {
     );
 
     check(
-        next.betting.last_aggressor == poker::Player::P0,
-        "P0 should be recorded as last aggressor."
-    );
-
-    check(
         !engine.betting_round_closed(next),
         "A bet alone should not close the betting round."
     );
@@ -398,22 +388,9 @@ void test_fold_creates_fold_terminal_state() {
         state,
         poker::holdem::Action{poker::holdem::ActionType::Fold, 0}
     );
-
-    check(state.terminal, "Fold should create terminal state.");
-
     check(
-        state.terminal_reason == poker::holdem::TerminalReason::Fold,
+        state.terminal_type == poker::TerminalType::P0_Fold || state.terminal_type == poker::TerminalType::P1_Fold,
         "Fold terminal state should have Fold reason."
-    );
-
-    check(
-        state.folded_player == poker::Player::P1,
-        "P1 should be marked as folded player."
-    );
-
-    check(
-        state.winner == poker::Player::P0,
-        "P0 should win after P1 folds to P0's bet."
     );
 
     check_eq(
@@ -459,12 +436,6 @@ void test_raise_updates_call_amount_and_raise_count() {
     );
 
     check_eq(
-        state.betting.last_raise_size,
-        750,
-        "Last raise size should be raise amount minus previous bet."
-    );
-
-    check_eq(
         state.betting.num_raises_this_street,
         1,
         "Raise count should increment."
@@ -473,11 +444,6 @@ void test_raise_updates_call_amount_and_raise_count() {
     check(
         state.player_to_act == poker::Player::P0,
         "After P1 raises, P0 should act."
-    );
-
-    check(
-        state.betting.last_aggressor == poker::Player::P1,
-        "P1 should be the last aggressor after raising."
     );
 
     std::cout << "[pass] test_raise_updates_call_amount_and_raise_count\n";

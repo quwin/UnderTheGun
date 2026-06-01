@@ -109,45 +109,41 @@ endif()
 
 add_library(kuhn_gpu_cfr_lib
         include/game.hpp
-        include/kuhn_builder.hpp
         include/cfr_cpu.hpp
         include/exploitability.hpp
         include/gpu_state.hpp
         include/cfr_gpu.hpp
 
-        include/poker/card.hpp
+        include/poker/board.hpp
         include/poker/deck_mask.hpp
         include/poker/hand.hpp
-        include/poker/board.hpp
         include/poker/range.hpp
-        include/poker/hand_evaluator.hpp
 
-        include/holdem/street.hpp
         include/holdem/action.hpp
-        include/holdem/betting_state.hpp
+        include/holdem/all_in_equity_cache.hpp
         include/holdem/betting_abstraction.hpp
         include/holdem/betting_engine.hpp
+        include/holdem/betting_state.hpp
+        include/holdem/board_abstraction.hpp
+        include/holdem/chance_model.hpp
+        include/holdem/hand_abstraction.hpp
+        include/holdem/infoset_key.hpp
         include/holdem/public_state.hpp
         include/holdem/private_state.hpp
-        include/holdem/chance_model.hpp
-        include/holdem/terminal_utility.hpp
-        include/holdem/infoset_key.hpp
-        include/holdem/hand_abstraction.hpp
-        include/holdem/board_abstraction.hpp
-        include/holdem/subgame_config.hpp
         include/holdem/subgame_builder.hpp
+        include/holdem/subgame_config.hpp
+        include/holdem/terminal_utility.hpp
 
-        src/kuhn_builder.cpp
         src/cfr_cpu.cpp
         src/exploitability.cpp
         src/cfr_gpu.cpp
 
-        src/poker/hand_evaluator.cpp
         src/holdem/betting_engine.cpp
         src/holdem/subgame_builder.cpp
 
         cuda/kernels.cu
         cuda/kernels.hpp
+        src/game.cpp
 )
 
 target_include_directories(kuhn_gpu_cfr_lib
@@ -229,30 +225,6 @@ add_test(
         COMMAND test_betting_engine
 )
 
-add_executable(test_deck_mask
-        tests/test_deck_mask.cpp
-)
-target_link_libraries(test_deck_mask
-        PRIVATE
-        kuhn_gpu_cfr_lib
-)
-add_test(
-        NAME test_deck_mask
-        COMMAND test_deck_mask
-)
-
-add_executable(test_hand_evaluator
-        tests/test_hand_evaluator.cpp
-)
-target_link_libraries(test_hand_evaluator
-        PRIVATE
-        kuhn_gpu_cfr_lib
-)
-add_test(
-        NAME test_hand_evaluator
-        COMMAND test_hand_evaluator
-)
-
 add_executable(test_infoset_key_privacy
         tests/test_infoset_key_privacy.cpp
 )
@@ -265,17 +237,6 @@ add_test(
         COMMAND test_infoset_key_privacy
 )
 
-add_executable(test_range_card_removal
-        tests/test_range_card_removal.cpp
-)
-target_link_libraries(test_range_card_removal
-        PRIVATE
-        kuhn_gpu_cfr_lib
-)
-add_test(
-        NAME test_range_card_removal
-        COMMAND test_range_card_removal
-)
 add_executable(test_terminal_utility
         tests/test_terminal_utility.cpp
 )

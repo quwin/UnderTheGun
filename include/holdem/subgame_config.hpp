@@ -1,114 +1,106 @@
 #pragma once
 
-#include "game.hpp"
+#include "../game.hpp"
 
 #include "betting_abstraction.hpp"
 #include "board_abstraction.hpp"
 #include "hand_abstraction.hpp"
 #include "public_state.hpp"
-#include "street.hpp"
 
 #include "poker/board.hpp"
 #include "poker/range.hpp"
 
 #include <memory>
 #include <stdexcept>
-#include <string>
 
 namespace poker::holdem {
 
+enum class FirstToActRule : int {
+    // Use config.player_to_act for the root.
+    // On later streets, use oop_player.
+    OopActsFirst = 0,
+    // Always use P0 after a public street transition.
+    // Useful while testing.
+    P0ActsFirst = 1,
+    // Always use P1 after a public street transition.
+    P1ActsFirst = 2
+};
+
 struct HoldemSubgameConfig {
-    // -------------------------------------------------------------------------
-    // Starting public state
-    // -------------------------------------------------------------------------
-
-    Street start_street = Street::River;
     Board board;
-
-    // Pot at the start of the subgame.
+    // ---------------------------------------------------------------------
+    // Starting public state
+    // ---------------------------------------------------------------------
+    // Total pot at the start of the subgame.
     //
     // Convention:
-    //   pot_size already includes all chips committed before this subgame starts.
+    //   pot_size already includes all chips committed before this subgame.
     int pot_size = 0;
-
-    // Remaining effective stack for each player at the start of the subgame.
+    // Remaining stack for each player at the start of the subgame.
     //
-    // For now this assumes symmetric effective stacks:
-    //   p0_stack = effective_stack
-    //   p1_stack = effective_stack
+    // If you want asymmetric stacks later, replace effective_stack with
+    // p0_stack / p1_stack.
     int effective_stack = 0;
-
+    // Player to act at the root public state.
     Player player_to_act = Player::P0;
-
-    // -------------------------------------------------------------------------
+    // Position metadata used when advancing to later streets.
+    //
+    // In heads-up postflop Hold'em, OOP acts first on each street.
+    Player oop_player = Player::P0;
+    Player ip_player = Player::P1;
+    FirstToActRule first_to_act_rule = FirstToActRule::OopActsFirst;
+    // ---------------------------------------------------------------------
     // Private hand ranges
-    // -------------------------------------------------------------------------
-
+    // ---------------------------------------------------------------------
+    //
+    // These are not expanded as root chance branches.
+    //
+    // The public-tree builder uses them to build:
+    //
+    //   Game::p0_hands
+    //   Game::p1_hands
+    //   Game::hand_pairs
+    //
+    // Solver/evaluator code then uses those side tables for terminal values,
+    // card removal, and hand-aware strategy tensors.
     Range p0_range;
     Range p1_range;
-
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------
     // Betting abstraction
-    // -------------------------------------------------------------------------
-
+    // ---------------------------------------------------------------------
     BettingAbstraction betting_abstraction;
-
-    // -------------------------------------------------------------------------
-    // Optional card abstractions
-    // -------------------------------------------------------------------------
-
+    // ---------------------------------------------------------------------
+    // Card abstractions
+    // ---------------------------------------------------------------------
     // Exact by default.
-    std::shared_ptr<const HandAbstraction> hand_abstraction = make_exact_hand_abstraction();
-
-    // Exact by default.
-    std::shared_ptr<const BoardAbstraction> board_abstraction = make_exact_board_abstraction();
-
-    // -------------------------------------------------------------------------
-    // All-in handling
-    // -------------------------------------------------------------------------
-
-    // If true, all-in calls before the river are represented by explicit
-    // public-card chance nodes and final showdown terminals.
-    bool expand_all_in_runouts = true;
-
-    // If true, all-in calls before the river are collapsed into one expected-EV
-    // terminal node.
     //
-    // Do not set both collapse_all_in_runouts_to_ev and expand_all_in_runouts.
-    bool collapse_all_in_runouts_to_ev = false;
+    // In exact mode, one strategy bucket corresponds to one legal combo in
+    // the player's HandDomain.
+    //
+    // In bucketed mode, the builder may map multiple exact hands into one
+    // action-state bucket.
+    std::shared_ptr<const HandAbstraction> hand_abstraction =
+        make_exact_hand_abstraction();
+    // Exact by default.
+    //
+    // Public-board abstraction affects public chance transitions only.
+    std::shared_ptr<const BoardAbstraction> board_abstraction =
+        make_exact_board_abstraction();
+    // ---------------------------------------------------------------------
+    // All-in handling
+    // ---------------------------------------------------------------------
+    // If true, an all-in call before the river becomes a single terminal node.
+    // Its EV must be computed by a terminal/all-in evaluator over hand pairs.
+    //
+    // Cannot be true at the same time as expand_all_in_runouts.
+    bool collapse_all_in_runouts_to_ev = true;
 
-    // -------------------------------------------------------------------------
-    // Builder/debug options
-    // -------------------------------------------------------------------------
 
-    // Useful for early testing. If true, builder may do extra expensive
-    // consistency checks.
-    bool validate_tree_during_build = true;
-
-    // If true, reject preflop configs until preflop logic is implemented.
-    bool reject_preflop = true;
-
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------
     // Validation
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------
 
     void validate() const {
-        validate_street(start_street);
-
-        if (reject_preflop && start_street == Street::Preflop) {
-            throw std::invalid_argument(
-                "Preflop subgames are not implemented yet."
-            );
-        }
-
-        board.validate();
-
-        if (!board_size_matches_street(start_street, board.size())) {
-            throw std::invalid_argument(
-                "HoldemSubgameConfig board size does not match start_street."
-            );
-        }
-
         if (pot_size < 0) {
             throw std::invalid_argument(
                 "HoldemSubgameConfig pot_size must be nonnegative."
@@ -121,10 +113,43 @@ struct HoldemSubgameConfig {
             );
         }
 
-        if (player_to_act != Player::P0 && player_to_act != Player::P1) {
+        if (player_to_act != Player::P0 &&
+            player_to_act != Player::P1) {
             throw std::invalid_argument(
                 "HoldemSubgameConfig player_to_act must be P0 or P1."
             );
+        }
+
+        if (oop_player != Player::P0 &&
+            oop_player != Player::P1) {
+            throw std::invalid_argument(
+                "HoldemSubgameConfig oop_player must be P0 or P1."
+            );
+        }
+
+        if (ip_player != Player::P0 &&
+            ip_player != Player::P1) {
+            throw std::invalid_argument(
+                "HoldemSubgameConfig ip_player must be P0 or P1."
+            );
+        }
+
+        if (oop_player == ip_player) {
+            throw std::invalid_argument(
+                "HoldemSubgameConfig oop_player and ip_player must differ."
+            );
+        }
+
+        switch (first_to_act_rule) {
+            case FirstToActRule::OopActsFirst:
+            case FirstToActRule::P0ActsFirst:
+            case FirstToActRule::P1ActsFirst:
+                break;
+
+            default:
+                throw std::invalid_argument(
+                    "HoldemSubgameConfig first_to_act_rule is invalid."
+                );
         }
 
         if (p0_range.empty()) {
@@ -152,104 +177,38 @@ struct HoldemSubgameConfig {
                 "HoldemSubgameConfig board_abstraction cannot be null."
             );
         }
-
-        if (expand_all_in_runouts && collapse_all_in_runouts_to_ev) {
-            throw std::invalid_argument(
-                "Cannot both expand and collapse all-in runouts."
-            );
-        }
-
-        // Verify at least one legal private hand pair remains after board
-        // blockers. This is potentially O(range^2), but config validation is
-        // not in the CFR loop.
-        const std::vector<LegalHandPair> pairs =
-            legal_hand_pairs(
-                p0_range,
-                p1_range,
-                board
-            );
-
-        if (pairs.empty()) {
-            throw std::invalid_argument(
-                "No legal private hand pairs remain after board card removal."
-            );
-        }
     }
 
-    PublicState initial_public_state() const {
-        validate();
+    // ---------------------------------------------------------------------
+    // Initial public state
+    // ---------------------------------------------------------------------
 
-        return make_initial_public_state(
-            start_street,
-            board,
-            pot_size,
-            effective_stack,
-            player_to_act
+    [[nodiscard]] PublicState initial_public_state() const {
+        validate();
+        PublicState state;
+        state.board = board;
+        state.p0_stack = effective_stack;
+        state.p1_stack = effective_stack;
+        state.pot = pot_size;
+        state.player_to_act = player_to_act;
+        state.betting = BettingState{};
+        state.validate();
+        return state;
+    }
+
+    Player first_player_to_act_after_street_transition() const {
+        switch (first_to_act_rule) {
+            case FirstToActRule::OopActsFirst:
+                return oop_player;
+            case FirstToActRule::P0ActsFirst:
+                return Player::P0;
+            case FirstToActRule::P1ActsFirst:
+                return Player::P1;
+        }
+        throw std::logic_error(
+            "Invalid FirstToActRule in first_player_to_act_after_street_transition."
         );
     }
 };
-
-inline HoldemSubgameConfig make_default_river_subgame_config(
-    const Board& board,
-    const Range& p0_range,
-    const Range& p1_range,
-    int pot_size,
-    int effective_stack,
-    Player player_to_act
-) {
-    HoldemSubgameConfig config;
-
-    config.start_street = Street::River;
-    config.board = board;
-
-    config.pot_size = pot_size;
-    config.effective_stack = effective_stack;
-    config.player_to_act = player_to_act;
-
-    config.p0_range = p0_range;
-    config.p1_range = p1_range;
-
-    config.betting_abstraction = make_standard_abstraction();
-
-    config.hand_abstraction = make_exact_hand_abstraction();
-    config.board_abstraction = make_exact_board_abstraction();
-
-    config.expand_all_in_runouts = true;
-    config.collapse_all_in_runouts_to_ev = false;
-
-    config.validate();
-
-    return config;
-}
-
-inline HoldemSubgameConfig make_tiny_river_subgame_config(
-    const Board& board,
-    const Range& p0_range,
-    const Range& p1_range
-) {
-    HoldemSubgameConfig config;
-
-    config.start_street = Street::River;
-    config.board = board;
-
-    config.pot_size = 1000;
-    config.effective_stack = 2000;
-    config.player_to_act = Player::P0;
-
-    config.p0_range = p0_range;
-    config.p1_range = p1_range;
-
-    config.betting_abstraction = make_tiny_betting_abstraction();
-
-    config.hand_abstraction = make_exact_hand_abstraction();
-    config.board_abstraction = make_exact_board_abstraction();
-
-    config.expand_all_in_runouts = true;
-    config.collapse_all_in_runouts_to_ev = false;
-
-    config.validate();
-
-    return config;
-}
 
 } // namespace poker::holdem

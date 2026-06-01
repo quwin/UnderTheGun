@@ -7,10 +7,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstdint>
 #include <initializer_list>
 #include <stdexcept>
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -27,57 +25,44 @@ public:
     Range() {
         clear();
     }
-
     void clear() {
         weights_.fill(0.0f);
         nonzero_hands_.clear();
     }
-
-    float weight(HandId hand_id) const {
+    [[nodiscard]] float weight(HandId hand_id) const {
         validate_hand_id(hand_id);
         return weights_[hand_id];
     }
-
     void set_weight(HandId hand_id, float weight) {
         validate_hand_id(hand_id);
-
         if (!std::isfinite(weight)) {
             throw std::invalid_argument("Range weight must be finite.");
         }
-
         if (weight < 0.0f) {
             throw std::invalid_argument("Range weight must be nonnegative.");
         }
-
         const bool was_positive = weights_[hand_id] > 0.0f;
         const bool now_positive = weight > 0.0f;
-
         weights_[hand_id] = weight;
-
         if (!was_positive && now_positive) {
             nonzero_hands_.push_back(hand_id);
         } else if (was_positive && !now_positive) {
             erase_nonzero_hand(hand_id);
         }
     }
-
-    bool contains(HandId hand_id) const {
+    [[nodiscard]] bool contains(HandId hand_id) const {
         return weight(hand_id) > 0.0f;
     }
-
-    int nonzero_count() const {
+    [[nodiscard]] int nonzero_count() const {
         return static_cast<int>(nonzero_hands_.size());
     }
-
-    bool empty() const {
+    [[nodiscard]] bool empty() const {
         return nonzero_hands_.empty();
     }
-
-    const std::vector<HandId>& hands_with_positive_weight() const {
+    [[nodiscard]] const std::vector<HandId>& hands_with_positive_weight() const {
         return nonzero_hands_;
     }
-
-    double total_weight() const {
+    [[nodiscard]] double total_weight() const {
         double total = 0.0;
 
         for (HandId hand_id : nonzero_hands_) {
@@ -86,8 +71,7 @@ public:
 
         return total;
     }
-
-    Range normalized() const {
+    [[nodiscard]] Range normalized() const {
         const double total = total_weight();
 
         if (total <= 0.0) {
@@ -107,8 +91,7 @@ public:
 
         return result;
     }
-
-    Range remove_blocked(DeckMask dead_cards) const {
+    [[nodiscard]] Range remove_blocked(DeckMask dead_cards) const {
         validate_deck_mask(dead_cards);
 
         Range result;
@@ -123,12 +106,10 @@ public:
 
         return result;
     }
-
-    Range remove_blocked_by_board(const Board& board) const {
+    [[nodiscard]] Range remove_blocked_by_board(const Board& board) const {
         return remove_blocked(board_mask(board));
     }
-
-    std::vector<HandId> legal_hands(DeckMask dead_cards) const {
+    [[nodiscard]] std::vector<HandId> legal_hands(DeckMask dead_cards) const {
         validate_deck_mask(dead_cards);
 
         std::vector<HandId> result;
@@ -142,11 +123,9 @@ public:
 
         return result;
     }
-
 private:
     std::array<float, kNumHands> weights_{};
     std::vector<HandId> nonzero_hands_;
-
     void erase_nonzero_hand(HandId hand_id) {
         const auto it = std::find(
             nonzero_hands_.begin(),
@@ -159,24 +138,19 @@ private:
         }
     }
 };
-
 inline Range make_empty_range() {
     Range range;
     range.clear();
     return range;
 }
-
 inline Range make_full_combo_range() {
     Range range;
     range.clear();
-
     for (int id = 0; id < kNumHands; ++id) {
         range.set_weight(static_cast<HandId>(id), 1.0f);
     }
-
     return range;
 }
-
 inline Range make_range(
     std::initializer_list<std::pair<HandId, float>> entries
 ) {
@@ -186,7 +160,6 @@ inline Range make_range(
     for (const auto& [hand_id, weight] : entries) {
         range.set_weight(hand_id, weight);
     }
-
     return range;
 }
 

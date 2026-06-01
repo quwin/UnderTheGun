@@ -80,7 +80,7 @@ struct PrivateState {
         return p0_mask() | p1_mask();
     }
 
-    bool contains(CardId card) const {
+    bool contains(phevaluator::Card card) const {
         return p0_hand.contains(card) || p1_hand.contains(card);
     }
 

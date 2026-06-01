@@ -1,250 +1,190 @@
 #include "cfr_cpu.hpp"
 #include "exploitability.hpp"
 
-#ifdef UNDER_THE_GUN_ENABLE_CUDA
 #include "cfr_gpu.hpp"
-#endif
 
-#include <cmath>
-#include <cstdlib>
-#include <exception>
+#include "holdem/subgame_builder.hpp"
+#include "holdem/subgame_config.hpp"
+
+#include <chrono>
 #include <iomanip>
 #include <iostream>
-#include <stdexcept>
-#include <string>
 #include <vector>
-
-#include "kuhn_builder.hpp"
+#include <cmath>
 
 namespace {
+poker::Board make_test_board() {
+    return poker::Board{
+        {
+            phevaluator::Card("As"),
+            phevaluator::Card("7h"),
+            phevaluator::Card("Jh"),
+        }
+    };
+}
 
-struct ProgramOptions {
-    int iterations = 1000;
-    bool use_gpu = false;
-    bool print_strategy = false;
+    poker::Range make_tiny_p0_range() {
+    poker::Range range;
+    range.clear();
+
+    range.set_weight(
+        poker::make_hand(
+            phevaluator::Card("Kh"),
+            phevaluator::Card("Qh")
+        ),
+        1.0f
+    );
+
+    range.set_weight(
+        poker::make_hand(
+            phevaluator::Card("Ks"),
+            phevaluator::Card("Kd")
+        ),
+        1.0f
+    );
+
+    return range;
+}
+
+    poker::Range make_tiny_p1_range() {
+    poker::Range range;
+    range.clear();
+
+    range.set_weight(
+        poker::make_hand(
+            phevaluator::Card("Qc"),
+            phevaluator::Card("Qd")
+        ),
+        1.0f
+    );
+
+    range.set_weight(
+        poker::make_hand(
+            phevaluator::Card("Th"),
+            phevaluator::Card("9h")
+        ),
+        1.0f
+    );
+
+    return range;
+}
+
+poker::holdem::HoldemSubgameConfig make_test_config() {
+    poker::holdem::HoldemSubgameConfig config;
+
+    config.board = make_test_board();
+    config.pot_size = 100;
+    config.effective_stack = 2000;
+    config.player_to_act = poker::Player::P0;
+    config.collapse_all_in_runouts_to_ev = true;
+    config.p0_range = make_tiny_p0_range();
+    config.p1_range = make_tiny_p1_range();
+    config.betting_abstraction = poker::holdem::make_standard_abstraction();
+
+    return config;
+}
+
+using Clock = std::chrono::steady_clock;
+
+struct BenchResult {
+    std::string name;
+    double seconds = 0.0;
+    double iters_per_sec = 0.0;
+    std::vector<float> avg_strategy;
 };
 
-void print_usage(const char* program_name) {
-    std::cout
-        << "Usage:\n"
-        << "  " << program_name << " [--iterations N] [--gpu] [--print-strategy]\n\n"
-        << "Examples:\n"
-        << "  " << program_name << "\n"
-        << "  " << program_name << " --iterations 100000\n"
-        << "  " << program_name << " --gpu --iterations 100000\n";
-}
-
-ProgramOptions parse_args(int argc, char** argv) {
-    ProgramOptions options;
-
-    for (int i = 1; i < argc; ++i) {
-        const std::string arg = argv[i];
-
-        if (arg == "--help" || arg == "-h") {
-            print_usage(argv[0]);
-            std::exit(0);
-        }
-
-        if (arg == "--gpu") {
-            options.use_gpu = true;
-            continue;
-        }
-
-        if (arg == "--print-strategy") {
-            options.print_strategy = true;
-            continue;
-        }
-
-        if (arg == "--iterations") {
-            if (i + 1 >= argc) {
-                throw std::invalid_argument("--iterations requires a value.");
-            }
-
-            options.iterations = std::stoi(argv[++i]);
-
-            if (options.iterations < 0) {
-                throw std::invalid_argument("iterations must be nonnegative.");
-            }
-
-            continue;
-        }
-
-        throw std::invalid_argument("Unknown argument: " + arg);
-    }
-
-    return options;
-}
-
-void print_game_summary(const poker::Game& game) {
-    int terminal_count = 0;
-    int chance_count = 0;
-    int p0_count = 0;
-    int p1_count = 0;
-
-    for (const poker::Node& node : game.nodes) {
-        if (node.terminal) {
-            ++terminal_count;
-        }
-
-        if (node.player == poker::Player::Chance) {
-            ++chance_count;
-        } else if (node.player == poker::Player::P0) {
-            ++p0_count;
-        } else if (node.player == poker::Player::P1) {
-            ++p1_count;
-        }
-    }
-
-    std::cout << "Game summary\n";
-    std::cout << "------------\n";
-    std::cout << "Nodes:      " << game.num_nodes() << "\n";
-    std::cout << "Terminals:  " << terminal_count << "\n";
-    std::cout << "Infosets:   " << game.num_infosets() << "\n";
-    std::cout << "Q entries:  " << game.num_q() << "\n";
-    std::cout << "Max depth:  " << game.max_depth << "\n";
-    std::cout << "Chance:     " << chance_count << " nodes\n";
-    std::cout << "P0:         " << p0_count << " nodes\n";
-    std::cout << "P1:         " << p1_count << " nodes\n";
-    std::cout << "\n";
-}
-
-void print_strategy(
-    const poker::Game& game,
-    const std::vector<float>& strategy,
-    const std::string& title
+double max_abs_diff(
+    const std::vector<float>& a,
+    const std::vector<float>& b
 ) {
-    if (static_cast<int>(strategy.size()) != game.num_q()) {
-        throw std::invalid_argument("Strategy size does not match game.num_q().");
+    if (a.size() != b.size()) {
+        throw std::runtime_error("Strategy sizes differ.");
     }
 
-    std::cout << title << "\n";
-    std::cout << std::string(title.size(), '-') << "\n";
-
-    std::cout << std::fixed << std::setprecision(6);
-
-    for (const poker::InfoSet& infoset : game.infosets) {
-        std::cout
-            << "Infoset " << infoset.id
-            << " | player=" << poker::to_string(infoset.player)
-            << " | history=\"" << infoset.key << "\"\n";
-
-        for (int local_action = 0;
-             local_action < static_cast<int>(infoset.actions.size());
-             ++local_action) {
-            const int q = infoset.q_indices[local_action];
-
-            std::cout
-                << "  "
-                << poker::to_string(infoset.actions[local_action])
-                << ": "
-                << strategy[q]
-                << "\n";
-        }
+    double diff = 0.0;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        diff = std::max(diff, std::abs(
+            static_cast<double>(a[i]) - static_cast<double>(b[i])
+        ));
     }
-
-    std::cout << "\n";
+    return diff;
 }
 
-void print_exploitability_report(
-    const poker::ExploitabilityResult& result
-) {
-    std::cout << std::fixed << std::setprecision(8);
-
-    std::cout << "Exploitability report\n";
-    std::cout << "---------------------\n";
-    std::cout << "Strategy value P0:       " << result.strategy_value_p0 << "\n";
-    std::cout << "Best response value P0:  " << result.best_response_value_p0 << "\n";
-    std::cout << "Best response value P1:  " << result.best_response_value_p1 << "\n";
-    std::cout << "P0 exploitability:       " << result.p0_exploitability << "\n";
-    std::cout << "P1 exploitability:       " << result.p1_exploitability << "\n";
-    std::cout << "Exploitability:          " << result.exploitability << "\n";
-    std::cout << "\n";
-}
-
-std::vector<float> run_cpu_solver(
+BenchResult run_cpu_benchmark(
     const poker::Game& game,
     int iterations
 ) {
-    std::cout << "Running CPU CFR for " << iterations << " iterations...\n";
+    const poker::CfrConfig config;
+    const poker::TerminalValueProvider terminal_values;
+    poker::CpuCfrSolver solver(game,terminal_values, config);
 
-    poker::CfrConfig config;
-    config.use_cfr_plus = false;
-    config.linear_averaging = false;
-
-    poker::CpuCfrSolver solver(game, config);
+    const auto t0 = Clock::now();
     solver.run_iterations(iterations);
+    const auto t1 = Clock::now();
 
-    std::cout << "CPU iterations run: " << solver.stats().iterations_run << "\n";
-    std::cout << "CPU root value P0:  " << solver.stats().last_root_value_p0 << "\n";
-    std::cout << "\n";
-
-    return solver.average_strategy();
+    BenchResult r;
+    r.name = "CPU";
+    r.seconds = std::chrono::duration<double>(t1 - t0).count();
+    r.iters_per_sec = iterations / r.seconds;
+    r.avg_strategy = solver.average_strategy();
+    return r;
 }
 
-#ifdef UNDER_THE_GUN_ENABLE_CUDA
-
-std::vector<float> run_gpu_solver(
+BenchResult run_gpu_benchmark(
     const poker::Game& game,
     int iterations
 ) {
-    std::cout << "Running GPU CFR for " << iterations << " iterations...\n";
-
     poker::GpuCfrConfig config;
-    config.use_cfr_plus = false;
-    config.linear_averaging = false;
-    config.synchronize_each_iteration = true;
-
+    config.synchronize_each_iteration = false; // true only while debugging
     poker::GpuCfrSolver solver(game, config);
+    const auto t0 = Clock::now();
     solver.run_iterations(iterations);
+    // average_strategy() performs a device-to-host copy, forcing completion.
+    std::vector<float> avg = solver.average_strategy();
 
-    std::cout << "GPU iterations run: " << solver.stats().iterations_run << "\n";
-    std::cout << "GPU root value P0:  " << solver.stats().last_root_value_p0 << "\n";
-    std::cout << "\n";
+    const auto t1 = Clock::now();
 
-    return solver.average_strategy();
+    BenchResult r;
+    r.name = "GPU";
+    r.seconds = std::chrono::duration<double>(t1 - t0).count();
+    r.iters_per_sec = iterations / r.seconds;
+    r.avg_strategy = std::move(avg);
+    return r;
 }
 
-#endif
+void print_result(const BenchResult& r) {
+    std::cout
+        << std::left << std::setw(8) << r.name
+        << " time=" << std::setw(10) << r.seconds << "s"
+        << " iter/s=" << std::setw(12) << r.iters_per_sec
+        << "\n";
+}
 
 } // namespace
 
-int main(int argc, char** argv) {
+int main() {
     try {
-        const ProgramOptions options = parse_args(argc, argv);
+        constexpr int iterations = 100;
 
-        poker::Game game = poker::build_kuhn_game();
+        const poker::holdem::HoldemSubgameConfig config = make_test_config();
+        const poker::Game game = poker::holdem::HoldemSubgameBuilder(config).build();
+        game.print_game_memory_usage();
+        std::cout << "Benchmarking " << iterations << " CFR iterations\n";
+        std::cout << "Nodes: " << game.num_nodes() << "\n";
 
-        print_game_summary(game);
+        const BenchResult gpu = run_gpu_benchmark(game, iterations);
+        print_result(gpu);
 
-        std::vector<float> average_strategy;
+        // const BenchResult cpu = run_cpu_benchmark(game, iterations);
+        // print_result(cpu);
 
-        if (options.use_gpu) {
-#ifdef UNDER_THE_GUN_ENABLE_CUDA
-            average_strategy = run_gpu_solver(game, options.iterations);
-#else
-            std::cerr
-                << "This executable was built without CUDA support.\n"
-                << "Rebuild with UNDER_THE_GUN_ENABLE_CUDA enabled, or run without --gpu.\n";
 
-            return 1;
-#endif
-        } else {
-            average_strategy = run_cpu_solver(game, options.iterations);
-        }
-
-        poker::ExploitabilityEvaluator evaluator(game);
-        const poker::ExploitabilityResult exploitability =
-            evaluator.exploitability(average_strategy);
-
-        print_exploitability_report(exploitability);
-
-        if (options.print_strategy) {
-            print_strategy(game, average_strategy, "Average strategy");
-        }
+        // std::cout << "GPU speed relative to CPU: " << cpu.seconds / gpu.seconds << "x\n";
+        // std::cout << "Max avg-strategy abs diff: " << max_abs_diff(cpu.avg_strategy, gpu.avg_strategy) << std::endl;
 
         return 0;
-    } catch (const std::exception& ex) {
-        std::cerr << "Error: " << ex.what() << "\n";
+    } catch (const std::exception& e) {
+        std::cerr << "[error] " << e.what() << "\n";
         return 1;
     }
 }

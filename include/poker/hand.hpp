@@ -1,7 +1,7 @@
 #pragma once
 
-#include "poker/card.hpp"
-#include "poker/deck_mask.hpp"
+#include "../../external/PokerHandEvaluator/cpp/include/phevaluator/card.h"
+#include "deck_mask.hpp"
 
 #include <array>
 #include <cstdint>
@@ -17,12 +17,12 @@ constexpr int kNumCards = 52;
 constexpr int kNumHands = 1326;
 
 struct HoleCards {
-    CardId a = 0;
-    CardId b = 1;
+    phevaluator::Card a = 0;
+    phevaluator::Card b = 1;
 
     HoleCards() = default;
 
-    HoleCards(CardId first, CardId second)
+    HoleCards(phevaluator::Card first, phevaluator::Card second)
         : a(first), b(second) {
         validate();
         canonicalize();
@@ -39,20 +39,20 @@ struct HoleCards {
 
     void canonicalize() {
         if (b < a) {
-            const CardId tmp = a;
+            const phevaluator::Card tmp = a;
             a = b;
             b = tmp;
         }
     }
 
-    DeckMask mask() const {
+    [[nodiscard]] DeckMask mask() const {
         DeckMask result = empty_deck_mask();
         result = add_card(result, a);
         result = add_card(result, b);
         return result;
     }
 
-    bool contains(CardId card) const {
+    bool contains(phevaluator::Card card) const {
         return a == card || b == card;
     }
 };
@@ -73,7 +73,7 @@ inline bool operator<(const HoleCards& x, const HoleCards& y) {
     return x.b < y.b;
 }
 
-inline HoleCards make_hole_cards(CardId a, CardId b) {
+inline HoleCards make_hole_cards(phevaluator::Card a, phevaluator::Card b) {
     return HoleCards{a, b};
 }
 
@@ -106,8 +106,8 @@ struct HandLookupTables {
 
         for (int first = 0; first < kNumCards; ++first) {
             for (int second = first + 1; second < kNumCards; ++second) {
-                const CardId a = static_cast<CardId>(first);
-                const CardId b = static_cast<CardId>(second);
+                const phevaluator::Card a = static_cast<phevaluator::Card>(first);
+                const phevaluator::Card b = static_cast<phevaluator::Card>(second);
 
                 id_to_hand[id] = HoleCards{a, b};
                 hand_to_id[first][second] = id;
@@ -148,7 +148,7 @@ inline void validate_hand_id(HandId hand_id) {
     }
 }
 
-inline HandId make_hand(CardId a, CardId b) {
+inline HandId make_hand(phevaluator::Card a, phevaluator::Card b) {
     validate_card(a);
     validate_card(b);
 
@@ -175,11 +175,11 @@ inline HoleCards hand_from_id(HandId hand_id) {
     return detail::hand_lookup_tables().id_to_hand[hand_id];
 }
 
-inline CardId first_card(HandId hand_id) {
+inline phevaluator::Card first_card(HandId hand_id) {
     return hand_from_id(hand_id).a;
 }
 
-inline CardId second_card(HandId hand_id) {
+inline phevaluator::Card second_card(HandId hand_id) {
     return hand_from_id(hand_id).b;
 }
 
@@ -187,7 +187,7 @@ inline DeckMask hand_mask(HandId hand_id) {
     return hand_from_id(hand_id).mask();
 }
 
-inline bool hand_contains(HandId hand_id, CardId card) {
+inline bool hand_contains(HandId hand_id, phevaluator::Card card) {
     return hand_from_id(hand_id).contains(card);
 }
 
@@ -232,7 +232,7 @@ inline std::vector<HandId> legal_hands_excluding(DeckMask dead_cards) {
 }
 
 inline std::string to_string(const HoleCards& hand) {
-    return to_string(hand.a) + to_string(hand.b);
+    return hand.a.describeCard() + hand.b.describeCard();
 }
 
 inline std::string to_string(HandId hand_id) {
@@ -244,8 +244,8 @@ inline HoleCards parse_hole_cards(const std::string& text) {
         throw std::invalid_argument("Hole-card string must have length 4, e.g. AsKd.");
     }
 
-    const CardId a = parse_card(text.substr(0, 2));
-    const CardId b = parse_card(text.substr(2, 2));
+    const auto a = phevaluator::Card(text.substr(0, 2));
+    const auto b = phevaluator::Card(text.substr(2, 2));
 
     return HoleCards{a, b};
 }

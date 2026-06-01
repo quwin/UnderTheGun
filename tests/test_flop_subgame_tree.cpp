@@ -7,10 +7,10 @@
 #include "holdem/action.hpp"
 
 #include "poker/board.hpp"
-#include "poker/card.hpp"
 #include "poker/range.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
@@ -20,6 +20,9 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "cfr_cpu.hpp"
+#include "cfr_gpu.hpp"
 
 namespace {
 
@@ -43,37 +46,25 @@ void check_eq(
     }
 }
 
-poker::CardId c(poker::Rank rank, poker::Suit suit) {
-    return poker::make_card(rank, suit);
-}
 
 poker::Board make_test_flop_board() {
     return poker::Board{
         {
-            c(poker::Rank::Ace, poker::Suit::Spades),
-            c(poker::Rank::Seven, poker::Suit::Hearts),
-            c(poker::Rank::Two, poker::Suit::Clubs)
+            phevaluator::Card("As"),
+            phevaluator::Card("7h"),
+            phevaluator::Card("Jh")
         }
     };
 }
 
 poker::Range make_tiny_p0_range() {
     poker::Range range;
-
     range.clear();
 
     range.set_weight(
         poker::make_hand(
-            c(poker::Rank::Ace, poker::Suit::Hearts),
-            c(poker::Rank::King, poker::Suit::Hearts)
-        ),
-        1.0f
-    );
-
-    range.set_weight(
-        poker::make_hand(
-            c(poker::Rank::King, poker::Suit::Spades),
-            c(poker::Rank::King, poker::Suit::Diamonds)
+        phevaluator::Card("Kh"),
+        phevaluator::Card("Qh")
         ),
         1.0f
     );
@@ -83,25 +74,15 @@ poker::Range make_tiny_p0_range() {
 
 poker::Range make_tiny_p1_range() {
     poker::Range range;
-
     range.clear();
 
     range.set_weight(
         poker::make_hand(
-            c(poker::Rank::Queen, poker::Suit::Hearts),
-            c(poker::Rank::Queen, poker::Suit::Diamonds)
+        phevaluator::Card("Qc"),
+        phevaluator::Card("Qd")
         ),
         1.0f
     );
-
-    range.set_weight(
-        poker::make_hand(
-            c(poker::Rank::Jack, poker::Suit::Spades),
-            c(poker::Rank::Ten, poker::Suit::Spades)
-        ),
-        1.0f
-    );
-
     return range;
 }
 
@@ -591,6 +572,90 @@ void test_q_entries_are_contiguous_by_infoset() {
 
     std::cout << "[pass] test_q_entries_are_contiguous_by_infoset\n";
 }
+    using Clock = std::chrono::steady_clock;
+
+    struct BenchResult {
+        std::string name;
+        double seconds = 0.0;
+        double iters_per_sec = 0.0;
+        std::vector<float> avg_strategy;
+    };
+
+    double max_abs_diff(
+        const std::vector<float>& a,
+        const std::vector<float>& b
+    ) {
+        if (a.size() != b.size()) {
+            throw std::runtime_error("Strategy sizes differ.");
+        }
+
+        double diff = 0.0;
+        for (std::size_t i = 0; i < a.size(); ++i) {
+            diff = std::max(diff, std::abs(
+                static_cast<double>(a[i]) - static_cast<double>(b[i])
+            ));
+        }
+        return diff;
+    }
+    BenchResult run_cpu_benchmark(
+            const poker::Game& game,
+            int iterations
+        ) {
+        poker::CpuCfrSolver solver(game);
+        const auto t0 = Clock::now();
+        solver.run_iterations(iterations);
+        const auto t1 = Clock::now();
+        BenchResult r;
+        r.name = "CPU";
+        r.seconds = std::chrono::duration<double>(t1 - t0).count();
+        r.iters_per_sec = iterations / r.seconds;
+        r.avg_strategy = solver.average_strategy();
+        return r;
+    }
+
+    BenchResult run_gpu_benchmark(
+        const poker::Game& game,
+        int iterations
+    ) {
+        poker::GpuCfrSolver solver(game);
+        const auto t0 = Clock::now();
+        solver.run_iterations(iterations);
+        const auto t1 = Clock::now();
+
+        BenchResult r;
+        r.name = "GPU";
+        r.seconds = std::chrono::duration<double>(t1 - t0).count();
+        r.iters_per_sec = iterations / r.seconds;
+        r.avg_strategy = solver.average_strategy();
+
+        return r;
+    }
+
+    void print_result(const BenchResult& r) {
+        std::cout << "[info] "
+            << std::left << std::setw(8) << r.name
+            << " time=" << std::setw(10) << r.seconds << "s"
+            << " iter/s=" << std::setw(12) << r.iters_per_sec
+            << "\n";
+    }
+void test_flop_game_benchmark() {
+    const poker::Game game = build_test_game();
+    const int iterations = 100;
+    std::cout << "[info] Testing " << iterations << " CFR iteration(s)\n";
+    std::cout << "[info] Nodes: " << game.num_nodes()
+              << " Infosets: " << game.num_infosets()
+              << " Q: " << game.num_q() << "\n";
+
+    BenchResult cpu = run_cpu_benchmark(game, iterations);
+    print_result(cpu);
+
+    BenchResult gpu =run_gpu_benchmark(game, iterations);
+    print_result(gpu);
+
+    std::cout << "[info] GPU speed relative to CPU: " << cpu.seconds / gpu.seconds << "x\n";
+    std::cout << "[info] Max avg-strategy abs diff: " << max_abs_diff(cpu.avg_strategy, gpu.avg_strategy) << std::endl;
+    std::cout << "[pass] test_flop_game_runs\n";
+}
 
 void run_all_tests() {
     test_flop_subgame_builds_nonempty_tree();
@@ -604,6 +669,7 @@ void run_all_tests() {
     test_flop_tree_contains_deeper_public_chance_nodes();
     test_every_nonterminal_node_has_children();
     test_q_entries_are_contiguous_by_infoset();
+    test_flop_game_benchmark();
 }
 
 } // namespace

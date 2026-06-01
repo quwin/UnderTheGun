@@ -6,11 +6,10 @@
 #include "holdem/street.hpp"
 
 #include "poker/board.hpp"
-#include "poker/card.hpp"
 #include "poker/range.hpp"
 
 #include <algorithm>
-#include <cmath>
+#include <chrono>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
@@ -19,6 +18,9 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "cfr_cpu.hpp"
+#include "cfr_gpu.hpp"
 
 namespace {
 
@@ -45,7 +47,7 @@ void check_eq(
 }
 
 void check_near(
-    double actual,
+    const double actual,
     double expected,
     double tolerance,
     const std::string& message
@@ -60,18 +62,14 @@ void check_near(
     }
 }
 
-poker::CardId c(poker::Rank rank, poker::Suit suit) {
-    return poker::make_card(rank, suit);
-}
-
 poker::Board make_test_turn_board() {
     return poker::Board{
-        {
-            c(poker::Rank::Ace, poker::Suit::Spades),
-            c(poker::Rank::Seven, poker::Suit::Hearts),
-            c(poker::Rank::Two, poker::Suit::Clubs),
-            c(poker::Rank::Jack, poker::Suit::Diamonds)
-        }
+            {
+                phevaluator::Card("As"),
+                phevaluator::Card("7h"),
+                phevaluator::Card("Jh"),
+                phevaluator::Card("Ts"),
+            }
     };
 }
 
@@ -81,16 +79,16 @@ poker::Range make_tiny_p0_range() {
 
     range.set_weight(
         poker::make_hand(
-            c(poker::Rank::King, poker::Suit::Hearts),
-            c(poker::Rank::Queen, poker::Suit::Hearts)
+            phevaluator::Card("Kh"),
+            phevaluator::Card("Qh")
         ),
         1.0f
     );
 
     range.set_weight(
         poker::make_hand(
-            c(poker::Rank::King, poker::Suit::Spades),
-            c(poker::Rank::King, poker::Suit::Diamonds)
+            phevaluator::Card("Ks"),
+            phevaluator::Card("Kd")
         ),
         1.0f
     );
@@ -104,45 +102,21 @@ poker::Range make_tiny_p1_range() {
 
     range.set_weight(
         poker::make_hand(
-            c(poker::Rank::Queen, poker::Suit::Clubs),
-            c(poker::Rank::Queen, poker::Suit::Diamonds)
+            phevaluator::Card("Qc"),
+            phevaluator::Card("Qd")
         ),
         1.0f
     );
 
     range.set_weight(
         poker::make_hand(
-            c(poker::Rank::Ten, poker::Suit::Hearts),
-            c(poker::Rank::Nine, poker::Suit::Hearts)
+            phevaluator::Card("Th"),
+            phevaluator::Card("9h")
         ),
         1.0f
     );
 
     return range;
-}
-
-poker::holdem::BettingAbstraction make_tiny_betting_abstraction() {
-    poker::holdem::BettingAbstraction abstraction;
-
-    // Tiny structural tree:
-    //
-    // Unopened:
-    //   check
-    //   bet pot
-    //
-    // Facing bet:
-    //   fold
-    //   call
-    //
-    // No raises.
-    abstraction.first_bet_sizes = {
-        poker::holdem::BetSize::pot_fraction(1.0)
-    };
-
-    abstraction.raise_sizes = {};
-    abstraction.max_raises_per_street = 0;
-
-    return abstraction;
 }
 
 poker::holdem::HoldemSubgameConfig make_test_config() {
@@ -152,16 +126,16 @@ poker::holdem::HoldemSubgameConfig make_test_config() {
     config.board = make_test_turn_board();
 
     config.pot_size = 1000;
-    config.effective_stack = 200000;
+    config.effective_stack = 20000;
     config.player_to_act = poker::Player::P0;
 
     config.p0_range = make_tiny_p0_range();
     config.p1_range = make_tiny_p1_range();
 
-    config.betting_abstraction = make_tiny_betting_abstraction();
+    config.collapse_all_in_runouts_to_ev = true;
+    config.validate_tree_during_build = false;
 
-    //config.hand_abstraction = ;
-    //config.board_abstraction = ;
+    config.betting_abstraction = poker::holdem::make_standard_abstraction();
 
     return config;
 }
@@ -206,7 +180,72 @@ bool has_action_type(const poker::InfoSet& infoset, poker::holdem::ActionType ac
     }
     return false;
 }
+    using Clock = std::chrono::steady_clock;
 
+    struct BenchResult {
+        std::string name;
+        double seconds = 0.0;
+        double iters_per_sec = 0.0;
+        std::vector<float> avg_strategy;
+    };
+
+    double max_abs_diff(
+        const std::vector<float>& a,
+        const std::vector<float>& b
+    ) {
+        if (a.size() != b.size()) {
+            throw std::runtime_error("Strategy sizes differ.");
+        }
+
+        double diff = 0.0;
+        for (std::size_t i = 0; i < a.size(); ++i) {
+            diff = std::max(diff, std::abs(
+                static_cast<double>(a[i]) - static_cast<double>(b[i])
+            ));
+        }
+        return diff;
+    }
+BenchResult run_cpu_benchmark(
+        const poker::Game& game,
+        int iterations
+    ) {
+    poker::CpuCfrSolver solver(game);
+    const auto t0 = Clock::now();
+    solver.run_iterations(iterations);
+    const auto t1 = Clock::now();
+    BenchResult r;
+    r.name = "CPU";
+    r.seconds = std::chrono::duration<double>(t1 - t0).count();
+    r.iters_per_sec = iterations / r.seconds;
+    r.avg_strategy = solver.average_strategy();
+    return r;
+}
+
+BenchResult run_gpu_benchmark(
+    const poker::Game& game,
+    int iterations
+) {
+    poker::GpuCfrSolver solver(game);
+    const auto t0 = Clock::now();
+    solver.run_iterations(iterations);
+    const auto t1 = Clock::now();
+
+    BenchResult r;
+    r.name = "GPU";
+    r.seconds = std::chrono::duration<double>(t1 - t0).count();
+    r.iters_per_sec = iterations / r.seconds;
+    r.avg_strategy = solver.average_strategy();
+
+    return r;
+}
+
+void print_result(const BenchResult& r) {
+    std::cout << "[info] "
+        << std::left << std::setw(8) << r.name
+        << " time=" << std::setw(10) << r.seconds << "s"
+        << " iter/s=" << std::setw(12) << r.iters_per_sec
+        << "\n";
+}
 void test_turn_subgame_builds_nonempty_tree() {
     const poker::Game game = build_test_game();
 
@@ -665,6 +704,25 @@ void test_infoset_keys_do_not_obviously_encode_opponent_hand() {
     std::cout << "[pass] test_infoset_keys_do_not_obviously_encode_opponent_hand\n";
 }
 
+void test_turn_game_benchmark() {
+    const poker::Game game = build_test_game();
+    const int iterations = 100;
+    std::cout << "[info] Testing " << iterations << " CFR iteration(s)\n";
+    std::cout << "[info] Nodes: " << game.num_nodes()
+              << " Infosets: " << game.num_infosets()
+              << " Q: " << game.num_q() << "\n";
+
+    BenchResult cpu = run_cpu_benchmark(game, iterations);
+    print_result(cpu);
+
+    BenchResult gpu =run_gpu_benchmark(game, iterations);
+    print_result(gpu);
+
+    std::cout << "[info] GPU speed relative to CPU: " << cpu.seconds / gpu.seconds << "x\n";
+    std::cout << "[info] Max avg-strategy abs diff: " << max_abs_diff(cpu.avg_strategy, gpu.avg_strategy) << std::endl;
+    std::cout << "[pass] test_turn_game_runs\n";
+}
+
 void run_all_tests() {
     test_turn_subgame_builds_nonempty_tree();
     test_root_is_private_hand_chance_node();
@@ -678,6 +736,7 @@ void run_all_tests() {
     test_q_entries_are_contiguous_by_infoset();
     test_infosets_merge_across_opponent_private_hands();
     test_infoset_keys_do_not_obviously_encode_opponent_hand();
+    test_turn_game_benchmark();
 }
 
 } // namespace

@@ -160,15 +160,12 @@ inline BettingAbstraction make_standard_abstraction() {
 
     abstraction.first_bet_sizes = {
         BetSize::pot_fraction(0.50),
-        BetSize::pot_fraction(1.0),
-        BetSize::all_in()
+        BetSize::pot_fraction(1.0)
     };
-
     abstraction.raise_sizes = {
         BetSize::raise_multiplier(2.5),
         BetSize::all_in()
     };
-
     abstraction.max_raises_per_street = 1;
     abstraction.chip_unit = 1;
     abstraction.always_allow_all_in = false;

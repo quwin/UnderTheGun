@@ -6,7 +6,6 @@
 #include "holdem/street.hpp"
 
 #include "poker/board.hpp"
-#include "poker/card.hpp"
 #include "poker/hand.hpp"
 
 #include <cstdlib>
@@ -51,45 +50,38 @@ void check_ne(
     }
 }
 
-poker::HoleCards hand(
-    poker::CardId a,
-    poker::CardId b
-) {
-    return poker::HoleCards{a, b};
-}
-
 poker::Board make_river_board() {
     return poker::Board{
         {
-            poker::make_card(poker::Rank::Ace, poker::Suit::Spades),
-            poker::make_card(poker::Rank::Seven, poker::Suit::Hearts),
-            poker::make_card(poker::Rank::Two, poker::Suit::Clubs),
-            poker::make_card(poker::Rank::Jack, poker::Suit::Diamonds),
-            poker::make_card(poker::Rank::Four, poker::Suit::Spades)
+            phevaluator::Card("As"),
+            phevaluator::Card("7h"),
+            phevaluator::Card("2c"),
+            phevaluator::Card("Jd"),
+            phevaluator::Card("4s"),
         }
     };
 }
 
 poker::Board make_turn_board() {
     return poker::Board{
-            {
-                poker::make_card(poker::Rank::Ace, poker::Suit::Spades),
-                poker::make_card(poker::Rank::Seven, poker::Suit::Hearts),
-                poker::make_card(poker::Rank::Two, poker::Suit::Clubs),
-                poker::make_card(poker::Rank::Jack, poker::Suit::Diamonds),
-            }
+        {
+            phevaluator::Card("As"),
+            phevaluator::Card("7h"),
+            phevaluator::Card("2c"),
+            phevaluator::Card("Jd"),
+        }
     };
 }
 
 poker::Board make_different_river_board() {
     return poker::Board{
-        {
-            poker::make_card(poker::Rank::Ace, poker::Suit::Spades),
-            poker::make_card(poker::Rank::Seven, poker::Suit::Hearts),
-            poker::make_card(poker::Rank::Two, poker::Suit::Clubs),
-            poker::make_card(poker::Rank::Jack, poker::Suit::Diamonds),
-            poker::make_card(poker::Rank::King, poker::Suit::Spades)
-        }
+            {
+                phevaluator::Card("As"),
+                phevaluator::Card("7h"),
+                phevaluator::Card("2c"),
+                phevaluator::Card("Jd"),
+                phevaluator::Card("Ks"),
+            }
     };
 }
 
@@ -143,20 +135,18 @@ std::string key_string(
 void test_p0_key_ignores_p1_private_hand() {
     const poker::holdem::PublicState pub = make_public_state();
 
-    const poker::HoleCards p0_hand = hand(
-        poker::make_card(poker::Rank::King, poker::Suit::Hearts),
-        poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
+    auto p0_hand = poker::HoleCards (
+        phevaluator::Card("Kh"),
+        phevaluator::Card("Qh")
     );
-
-    const poker::HoleCards p1_hand_a = hand(
-        poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
-        poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
-    );
-
-    const poker::HoleCards p1_hand_b = hand(
-        poker::make_card(poker::Rank::Three, poker::Suit::Clubs),
-        poker::make_card(poker::Rank::Three, poker::Suit::Diamonds)
-    );
+    auto p1_hand_a = poker::HoleCards (
+       phevaluator::Card("9c"),
+       phevaluator::Card("9d")
+   );
+    auto p1_hand_b = poker::HoleCards (
+       phevaluator::Card("3c"),
+       phevaluator::Card("3d")
+   );
 
     const std::string key_a = key_string(
         poker::Player::P0,
@@ -183,19 +173,19 @@ void test_p1_key_ignores_p0_private_hand() {
     poker::holdem::PublicState pub = make_public_state();
     pub.player_to_act = poker::Player::P1;
 
-    const poker::HoleCards p0_hand_a = hand(
-        poker::make_card(poker::Rank::King, poker::Suit::Hearts),
-        poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
+    auto p0_hand_a = poker::HoleCards (
+        phevaluator::Card("Kh"),
+        phevaluator::Card("Qh")
     );
 
-    const poker::HoleCards p0_hand_b = hand(
-        poker::make_card(poker::Rank::Eight, poker::Suit::Clubs),
-        poker::make_card(poker::Rank::Eight, poker::Suit::Diamonds)
+    auto p0_hand_b = poker::HoleCards (
+        phevaluator::Card("8c"),
+        phevaluator::Card("8d")
     );
 
-    const poker::HoleCards p1_hand = hand(
-        poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
-        poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
+    auto p1_hand = poker::HoleCards (
+        phevaluator::Card("9c"),
+        phevaluator::Card("9d")
     );
 
     const std::string key_a = key_string(
@@ -222,19 +212,19 @@ void test_p1_key_ignores_p0_private_hand() {
 void test_p0_key_changes_when_p0_private_hand_changes() {
     const poker::holdem::PublicState pub = make_public_state();
 
-    const poker::HoleCards p0_hand_a = hand(
-        poker::make_card(poker::Rank::King, poker::Suit::Hearts),
-        poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
+    auto p0_hand_a = poker::HoleCards (
+        phevaluator::Card("Kh"),
+        phevaluator::Card("Qh")
     );
 
-    const poker::HoleCards p0_hand_b = hand(
-        poker::make_card(poker::Rank::Ten, poker::Suit::Clubs),
-        poker::make_card(poker::Rank::Ten, poker::Suit::Diamonds)
+    auto p0_hand_b = poker::HoleCards (
+        phevaluator::Card("Tc"),
+        phevaluator::Card("Td")
     );
 
-    const poker::HoleCards p1_hand = hand(
-        poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
-        poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
+    auto p1_hand = poker::HoleCards (
+        phevaluator::Card("9c"),
+        phevaluator::Card("9d")
     );
 
     const std::string key_a = key_string(
@@ -262,19 +252,19 @@ void test_p1_key_changes_when_p1_private_hand_changes() {
     poker::holdem::PublicState pub = make_public_state();
     pub.player_to_act = poker::Player::P1;
 
-    const poker::HoleCards p0_hand = hand(
-        poker::make_card(poker::Rank::King, poker::Suit::Hearts),
-        poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
+    auto p0_hand = poker::HoleCards (
+        phevaluator::Card("Kh"),
+        phevaluator::Card("Qh")
     );
 
-    const poker::HoleCards p1_hand_a = hand(
-        poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
-        poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
+    auto p1_hand_a = poker::HoleCards (
+        phevaluator::Card("9c"),
+        phevaluator::Card("9d")
     );
 
-    const poker::HoleCards p1_hand_b = hand(
-        poker::make_card(poker::Rank::Three, poker::Suit::Clubs),
-        poker::make_card(poker::Rank::Three, poker::Suit::Diamonds)
+    auto p1_hand_b = poker::HoleCards (
+        phevaluator::Card("3c"),
+        phevaluator::Card("3d")
     );
 
     const std::string key_a = key_string(
@@ -305,13 +295,13 @@ void test_key_changes_when_public_board_changes() {
     pub_b.board = make_different_river_board();
 
     const poker::holdem::PrivateState private_state = make_private_state(
-        hand(
-            poker::make_card(poker::Rank::King, poker::Suit::Hearts),
-            poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
+        poker::HoleCards (
+            phevaluator::Card("Kh"),
+            phevaluator::Card("Qh")
         ),
-        hand(
-            poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
-            poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
+        poker::HoleCards (
+            phevaluator::Card("9c"),
+            phevaluator::Card("9d")
         )
     );
 
@@ -353,13 +343,13 @@ void test_key_changes_when_public_betting_history_changes() {
     pub_b.betting.last_aggressor = poker::Player::P0;
 
     const poker::holdem::PrivateState private_state = make_private_state(
-        hand(
-            poker::make_card(poker::Rank::King, poker::Suit::Hearts),
-            poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
+        poker::HoleCards (
+            phevaluator::Card("Kh"),
+            phevaluator::Card("Qh")
         ),
-        hand(
-            poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
-            poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
+        poker::HoleCards (
+            phevaluator::Card("9c"),
+            phevaluator::Card("9d")
         )
     );
 
@@ -393,13 +383,13 @@ void test_key_changes_when_stack_or_pot_state_changes() {
     pub_b.betting.set_committed(poker::Player::P0, 500);
 
     const poker::holdem::PrivateState private_state = make_private_state(
-        hand(
-            poker::make_card(poker::Rank::King, poker::Suit::Hearts),
-            poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
+        poker::HoleCards (
+            phevaluator::Card("Kh"),
+            phevaluator::Card("Qh")
         ),
-        hand(
-            poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
-            poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
+        poker::HoleCards (
+            phevaluator::Card("9c"),
+            phevaluator::Card("9d")
         )
     );
 
@@ -432,13 +422,13 @@ void test_key_changes_when_street_changes() {
     pub_b.board = make_turn_board();
 
     const poker::holdem::PrivateState private_state = make_private_state(
-        hand(
-            poker::make_card(poker::Rank::King, poker::Suit::Hearts),
-            poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
+        poker::HoleCards (
+            phevaluator::Card("Kh"),
+            phevaluator::Card("Qh")
         ),
-        hand(
-            poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
-            poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
+        poker::HoleCards (
+            phevaluator::Card("9c"),
+            phevaluator::Card("9d")
         )
     );
 
@@ -466,14 +456,14 @@ void test_key_changes_when_street_changes() {
 void test_key_string_does_not_contain_opponent_hand_literals_for_p0() {
     const poker::holdem::PublicState pub = make_public_state();
 
-    const poker::HoleCards p0_hand = hand(
-        poker::make_card(poker::Rank::King, poker::Suit::Hearts),
-        poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
+    auto p0_hand = poker::HoleCards (
+        phevaluator::Card("Kh"),
+        phevaluator::Card("Qh")
     );
 
-    const poker::HoleCards p1_hand = hand(
-        poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
-        poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
+    auto p1_hand = poker::HoleCards (
+        phevaluator::Card("9c"),
+        phevaluator::Card("9d")
     );
 
     const std::string key = key_string(
@@ -504,14 +494,14 @@ void test_key_string_does_not_contain_opponent_hand_literals_for_p1() {
     poker::holdem::PublicState pub = make_public_state();
     pub.player_to_act = poker::Player::P1;
 
-    const poker::HoleCards p0_hand = hand(
-        poker::make_card(poker::Rank::King, poker::Suit::Hearts),
-        poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
+    auto p0_hand = poker::HoleCards (
+        phevaluator::Card("Kh"),
+        phevaluator::Card("Qh")
     );
 
-    const poker::HoleCards p1_hand = hand(
-        poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
-        poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
+    auto p1_hand = poker::HoleCards (
+        phevaluator::Card("9c"),
+        phevaluator::Card("9d")
     );
 
     const std::string key = key_string(
@@ -542,13 +532,13 @@ void test_key_rejects_non_acting_or_invalid_player() {
     const poker::holdem::PublicState pub = make_public_state();
 
     const poker::holdem::PrivateState private_state = make_private_state(
-        hand(
-            poker::make_card(poker::Rank::King, poker::Suit::Hearts),
-            poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
+        poker::HoleCards (
+            phevaluator::Card("Kh"),
+            phevaluator::Card("Qh")
         ),
-        hand(
-            poker::make_card(poker::Rank::Nine, poker::Suit::Clubs),
-            poker::make_card(poker::Rank::Nine, poker::Suit::Diamonds)
+        poker::HoleCards (
+            phevaluator::Card("9c"),
+            phevaluator::Card("9d")
         )
     );
 

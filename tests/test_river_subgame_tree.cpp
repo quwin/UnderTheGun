@@ -6,7 +6,6 @@
 #include "holdem/street.hpp"
 
 #include "poker/board.hpp"
-#include "poker/card.hpp"
 #include "poker/range.hpp"
 
 #include <algorithm>
@@ -60,15 +59,14 @@ void check_near(
         throw std::runtime_error(oss.str());
     }
 }
-
 poker::Board make_test_river_board() {
     return poker::Board{
         {
-            poker::make_card(poker::Rank::Ace, poker::Suit::Spades),
-            poker::make_card(poker::Rank::Seven, poker::Suit::Hearts),
-            poker::make_card(poker::Rank::Two, poker::Suit::Clubs),
-            poker::make_card(poker::Rank::Jack, poker::Suit::Diamonds),
-            poker::make_card(poker::Rank::Four, poker::Suit::Spades)
+            phevaluator::Card("As"),
+            phevaluator::Card("7h"),
+            phevaluator::Card("Jh"),
+            phevaluator::Card("Ts"),
+            phevaluator::Card("4s"),
         }
     };
 }
@@ -79,16 +77,16 @@ poker::Range make_tiny_p0_range() {
 
     range.set_weight(
         poker::make_hand(
-            poker::make_card(poker::Rank::King, poker::Suit::Hearts),
-            poker::make_card(poker::Rank::Queen, poker::Suit::Hearts)
+        phevaluator::Card("Kh"),
+        phevaluator::Card("Qh")
         ),
         1.0f
     );
 
     range.set_weight(
         poker::make_hand(
-            poker::make_card(poker::Rank::King, poker::Suit::Spades),
-            poker::make_card(poker::Rank::King, poker::Suit::Diamonds)
+            phevaluator::Card("Ks"),
+            phevaluator::Card("Kd")
         ),
         1.0f
     );
@@ -102,16 +100,16 @@ poker::Range make_tiny_p1_range() {
 
     range.set_weight(
         poker::make_hand(
-            poker::make_card(poker::Rank::Queen, poker::Suit::Clubs),
-            poker::make_card(poker::Rank::Queen, poker::Suit::Diamonds)
+            phevaluator::Card("Qc"),
+            phevaluator::Card("Qd")
         ),
         1.0f
     );
 
     range.set_weight(
         poker::make_hand(
-            poker::make_card(poker::Rank::Ten, poker::Suit::Hearts),
-            poker::make_card(poker::Rank::Nine, poker::Suit::Hearts)
+            phevaluator::Card("9h"),
+            phevaluator::Card("Th")
         ),
         1.0f
     );

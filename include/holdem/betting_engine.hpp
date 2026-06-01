@@ -1,11 +1,10 @@
 #pragma once
 
-#include "game.hpp"
+#include "../game.hpp"
 
 #include "action.hpp"
 #include "betting_abstraction.hpp"
 #include "public_state.hpp"
-#include "street.hpp"
 
 #include <vector>
 
@@ -14,17 +13,14 @@ namespace poker::holdem {
 class BettingEngine {
 public:
     BettingEngine() = default;
-
     // Returns all legal abstract actions from the current public state.
     //
     // Examples:
-    //
     // Unopened pot:
     //   check
     //   bet 50% pot
     //   bet 100% pot
     //   all-in
-    //
     // Facing bet:
     //   fold
     //   call
@@ -34,7 +30,6 @@ public:
         const PublicState& state,
         const BettingAbstraction& abstraction
     ) const;
-
     // Applies one legal action and returns the next public state.
     //
     // This updates:
@@ -52,7 +47,6 @@ public:
         const PublicState& state,
         const Action& action
     ) const;
-
     // True when the current betting round has closed.
     //
     // Examples:
@@ -60,20 +54,21 @@ public:
     //   bet-call
     //   bet-raise-call
     //   all-in-call
-    bool betting_round_closed(
+    static bool betting_round_closed(
         const PublicState& state
-    ) const;
-
+    ) ;
     // True if state is terminal because somebody folded.
-    bool is_fold_terminal(
+    static bool is_fold_terminal(
         const PublicState& state
-    ) const;
+    ) ;
 
     // True if all remaining betting decisions are over because stacks are all-in.
-    bool is_all_in_terminal_for_betting(
+    static bool is_all_in_terminal_for_betting(
         const PublicState& state
-    ) const;
-
+    ) ;
+    static Player opponent_of(
+        Player player
+    ) ;
 private:
     // Legal-action helpers.
     std::vector<Action> legal_unopened_actions(
@@ -100,9 +95,9 @@ private:
     ) const;
 
     // Stack / pot helpers.
-    int actor_stack(
+    static int actor_stack(
         const PublicState& state
-    ) const;
+    ) ;
 
     int opponent_stack(
         const PublicState& state
@@ -116,17 +111,17 @@ private:
         const PublicState& state
     ) const;
 
-    int amount_to_call(
+    static int amount_to_call(
         const PublicState& state
-    ) const;
+    ) ;
 
     int actor_total_stack_available_this_street(
         const PublicState& state
     ) const;
 
-    int min_legal_raise_to(
+    static int min_legal_raise_to(
         const PublicState& state
-    ) const;
+    ) ;
 
     int max_legal_commitment(
         const PublicState& state
@@ -137,22 +132,18 @@ private:
         const BettingAbstraction& abstraction
     ) const;
 
-    bool is_unopened_pot(
+    static bool is_unopened_pot(
         const PublicState& state
-    ) const;
+    ) ;
 
-    bool is_facing_bet(
+    static bool is_facing_bet(
         const PublicState& state
-    ) const;
+    ) ;
 
-    Player opponent_of(
-        Player player
-    ) const;
-
-    int round_to_chip_unit(
+    static int round_to_chip_unit(
         int amount,
         int chip_unit
-    ) const;
+    ) ;
 
     // Mutation helpers used by apply_action.
     void commit_chips(
@@ -161,19 +152,13 @@ private:
         int additional_chips
     ) const;
 
-    void switch_player_to_act(
+    static void switch_player_to_act(
         PublicState& state
-    ) const;
-
-    void append_action_history(
-        PublicState& state,
-        const Action& action
-    ) const;
-
-    void validate_action_basic(
+    );
+    static void validate_action_basic(
         const PublicState& state,
         const Action& action
-    ) const;
+    ) ;
 };
 
 } // namespace poker::holdem
