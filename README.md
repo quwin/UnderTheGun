@@ -2,14 +2,15 @@
 
 ## Demo (from Shark, but usage is nearly identical): https://youtu.be/3Rcd4PqS9L0
 
+<img width="1536" height="859" alt="image" src="https://github.com/user-attachments/assets/126511f5-1b57-4095-8c99-e208ec80770f" />
+
 UnderTheGun is a completely free (and ad-free) open-source solver that implements state-of-the-art algorithms to solve Heads-Up (HU) poker. While other solvers exist, this project had two main goals:
 
 1. Acceleration  – Implement GPU-Accelerated Counterfactual Regret Minimization (CFR), according to this research paper: https://arxiv.org/html/2408.14778v1
 2. Accessibility – Allow anyone, even those unfamiliar with poker, to use the solver with ease.
 
-Many features seen in other solvers have been intentionally omitted to reduce clutter and cognitive load. Bet/raise sizes vary by street:
-- Flop: Bet 100%
-- Turn/River: Bet 50%, 100% | Raise 250%, All in
+Many features seen in other solvers have been intentionally omitted to reduce clutter and cognitive load. Bet/raise sizes are preset, and reraises are limited to one:
+- Bet minimum, 50%, 100% | Raise 250% | All in
 
 These trade-offs were made to maintain a clean user experience.
 
@@ -26,17 +27,17 @@ Input the following:
 - Starting Pot
 - Initial Min Bet
 - All-In Threshold (default: 0.67)
-- Pot Type (Single Raise, 3-bet, 4-bet)
+- Pot Type (Single Raise, 3-bet, 4-bet), used to automaticlly preset Ranges
 - Your Position (SB, BB, UTG, UTG+1, MP, LJ, HJ, CO, BTN)
 - Their Position
 - Iterations (default: 100)
 - Min Exploitability % (default: 0.1%, set to 0 to never stop early)
-- Thread Count (default: CPU cores - 1)
+- ~~Thread Count (default: CPU cores - 1)~~  currently unimplemented
 - CFR Resolver (default: GPU) 
 
 Options:
-- Auto-import ranges – automatically loads ranges based on positions and pot type
-- Force Donk Check – disables donk bets on flop (recommended for memory savings)
+- Auto-import ranges – automatically loads ranges based on positions and pot type 
+- Force Donk Check – ~~disables donk bets on flop~~ (recommended for memory savings) currently unimplemented
 
 ---
 
@@ -67,28 +68,6 @@ Use Back to return to inputs and solve a different game.
 
 ---
 
-## 🧠 Flop Solving (RAM-Saving Mode)
-
-Flop solving is the most memory-intensive part of the game tree. To make flop solves fit in a typical laptop's RAM, Shark applies a few flop-specific constraints that greatly reduce tree size and memory usage. The below ONLY applies for flop solves.
-
-### How the solver works for flop games (and why)
-
-1) Strategy compression to int16  
-For flop solving, strategy arrays are stored in a compressed int16 format to reduce memory usage. (Regrets are already compressed for turn & flop.)
-
-2) Max raises per street capped to 3 before force all-in  
-To prevent raise-wars from exploding the game tree, each street is capped at 3 raises. After the cap is reached, further raising is replaced by a forced all-in option.
-
-3) Force Donk Check is defaulted to true (highly recommended)  
-By default, Shark disables donk betting on flop to reduce branching and help memory usage.  
-Example: if flop goes p1 check → p2 raise/bet → p1 call, then on the turn p1 is forced to check (no donk lead).  
-This can be toggled off, but is highly recommended to keep enabled for flop solves.
-
-4) Flop action space is reduced to shrink tree size  
-Flop only has bet options of 50% and 100%, and a single raise option of 100% to reduce tree size. Turn/river retains all 3 bet sizes and 2 raise sizes.
-
----
-
 ## 🪟 Windows Installation
 1. Go to the Releases tab and download `utg_windows.zip`: https://github.com/24parida/shark-2.0/releases
 2. Unzip the folder
@@ -98,9 +77,8 @@ Flop only has bet options of 50% and 100%, and a single raise option of 100% to 
 ---
 
 ## 🔐 Security Note
-The reason for having to trust the file is b/c to get a developer license is around $100/year for each platforms which I currently can't afford for just a side project :(.  
+The reason for having to trust the file is b/c to get a developer license is around $100/year for each platforms which I currently can't afford for just a side project :(  
 For anyone wrorried about security: this project is fully open source — feel free to inspect the code yourself.  
-The build process is located in .github/workflows/new_ci.yml.
 
 ---
 
@@ -111,18 +89,14 @@ https://github.com/24parida/shark-2.0/
 
 ### Key Improvements:
 - Implemented GPU-Accelerated Counterfactual Regret Minimization
-- 50% memory reduction via int16 strategy compression (enables larger flop solves)
 - Collapse All-in calls to just Expected Value
-- Per-street bet sizing: different bet/raise options for flop vs turn/river
-- Bug fixes (e.g., proper chance node updates)
-- Support for asymmetric ranges (Fossana required hero = villain)
+- Various Bug fixes 
+- Support for asymmetric ranges
 - Added support for flop solving (not just turn)
-- Improved reach probability propagation
 - Fully functional GUI with oceanic blue theme
 - Solve caching – skips redundant computations when re-exploring
 - Undo history – navigate backwards through the game tree
 - Strategy export – copy ranges in PIO-compatible format
-- Thread count control – configure parallelism from the UI
 
 ### Base Algorithm:
 - Counter Factual Regret Minimization
@@ -139,7 +113,7 @@ https://github.com/HenryRLee/PokerHandEvaluator
 Hi, I'm Ethan Tran. I built this as a side project in order to improve my C++ skills, and also because I want to make poker more accessable!
 
 ### Future Optimizations I'd Like to Explore
-- Improved optimizations
+- Improved optimizations (especially auxillary storage optimizations)
 - Improved GUI design and overall UX
 - Additional bet sizing configurations
 - Preflop solver integration
