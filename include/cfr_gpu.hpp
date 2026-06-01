@@ -28,7 +28,7 @@ enum class GpuTerminalMode : int {
 
 struct GpuCfrConfig {
     int num_players = 2;
-    int threads_per_block = 256;
+    int threads_per_block = 512;
     // CFR+ clips cumulative regret at zero after each update.
     bool use_cfr_plus = false;
     // Vanilla CFR uses average weight 1.

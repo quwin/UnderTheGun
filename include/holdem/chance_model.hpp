@@ -9,11 +9,8 @@
 #include "poker/deck_mask.hpp"
 #include "poker/hand.hpp"
 #include "poker/range.hpp"
-
-#include <cmath>
 #include <memory>
 #include <stdexcept>
-#include <string>
 #include <vector>
 
 namespace poker::holdem {
@@ -79,11 +76,11 @@ public:
     //   range weights > 0
     //
     // Returned probabilities are normalized.
-    std::vector<PrivateDealOutcome> private_deal_outcomes(
+    static std::vector<PrivateDealOutcome> private_deal_outcomes(
         const Range& p0_range,
         const Range& p1_range,
         const Board& board
-    ) const {
+    ) {
         board.validate();
 
         const std::vector<LegalHandPair> legal_pairs =
@@ -114,9 +111,9 @@ public:
     }
 
     // Root chance overload for config.
-    std::vector<PrivateDealOutcome> private_deal_outcomes(
+    static std::vector<PrivateDealOutcome> private_deal_outcomes(
         const HoldemSubgameConfig& config
-    ) const {
+    ) {
         return private_deal_outcomes(
             config.p0_range,
             config.p1_range,
@@ -140,7 +137,7 @@ public:
     // This does not decide whether a betting round is closed. That is the
     // BettingEngine's job. The subgame builder should call this only when
     // public chance is actually needed.
-    std::vector<PublicBoardOutcome> public_board_outcomes(
+    [[nodiscard]] std::vector<PublicBoardOutcome> public_board_outcomes(
         const PublicState& state,
         const PrivateState& private_state,
         Player next_player_to_act
@@ -148,11 +145,11 @@ public:
         state.validate();
         private_state.validate();
 
-        if (state.terminal) {
+        if (state.is_terminal()) {
             return {};
         }
 
-        if (state.street == Street::River) {
+        if (state.board.is_river()) {
             return {};
         }
 
@@ -169,7 +166,6 @@ public:
 
         const std::vector<BoardTransition> transitions =
             board_abstraction_->next_board_transitions(
-                state.street,
                 state.board,
                 dead_cards
             );
@@ -190,9 +186,8 @@ public:
                 );
             }
 
-            PublicState next_state = make_next_street_public_state(
+            const PublicState next_state = make_next_street_public_state(
                 state,
-                transition.street,
                 transition.board,
                 next_player_to_act
             );
@@ -211,26 +206,24 @@ public:
         return outcomes;
     }
 
-    const BoardAbstraction& board_abstraction() const {
+    [[nodiscard]] const BoardAbstraction& board_abstraction() const {
         return *board_abstraction_;
     }
 
 private:
     std::shared_ptr<const BoardAbstraction> board_abstraction_;
 
-    static void validate_probability_value(float probability) {
+    static void validate_probability_value(const float probability) {
         if (!std::isfinite(probability)) {
             throw std::invalid_argument(
                 "Chance probability must be finite."
             );
         }
-
         if (probability <= 0.0f) {
             throw std::invalid_argument(
                 "Chance probability must be positive."
             );
         }
-
         if (probability > 1.0f) {
             throw std::invalid_argument(
                 "Chance probability cannot exceed 1."

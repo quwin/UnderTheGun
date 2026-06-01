@@ -6,9 +6,6 @@
 #include "subgame_config.hpp"
 #include "all_in_equity_cache.hpp"
 
-#include <vector>
-#include <cstdint>
-
 namespace poker::holdem {
     class HoldemSubgameBuilder {
     public:

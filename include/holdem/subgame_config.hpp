@@ -84,8 +84,7 @@ struct HoldemSubgameConfig {
     // Exact by default.
     //
     // Public-board abstraction affects public chance transitions only.
-    std::shared_ptr<const BoardAbstraction> board_abstraction =
-        make_exact_board_abstraction();
+    std::shared_ptr<const BoardAbstraction> board_abstraction = make_exact_board_abstraction();
     // ---------------------------------------------------------------------
     // All-in handling
     // ---------------------------------------------------------------------
@@ -196,7 +195,7 @@ struct HoldemSubgameConfig {
         return state;
     }
 
-    Player first_player_to_act_after_street_transition() const {
+    [[nodiscard]] Player first_player_to_act_after_street_transition() const {
         switch (first_to_act_rule) {
             case FirstToActRule::OopActsFirst:
                 return oop_player;
@@ -208,6 +207,21 @@ struct HoldemSubgameConfig {
         throw std::logic_error(
             "Invalid FirstToActRule in first_player_to_act_after_street_transition."
         );
+    }
+
+    [[nodiscard]] std::size_t memoryEstimate() const {
+        constexpr std::size_t minimum_game_capacity = 3400;
+        constexpr std::size_t hand_size = 100;
+        if (board.is_river()) {
+            return minimum_game_capacity + (hand_size * p0_range.nonzero_count() * p1_range.nonzero_count());
+        }
+        if (board.is_turn()) {
+            return (minimum_game_capacity + (hand_size * p0_range.nonzero_count() * p1_range.nonzero_count())) * 430;
+        }
+        if (board.is_flop()) {
+            return (minimum_game_capacity + (hand_size * p0_range.nonzero_count() * p1_range.nonzero_count())) * 430 * 300;
+        }
+        return 0;
     }
 };
 

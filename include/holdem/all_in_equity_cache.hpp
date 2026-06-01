@@ -45,8 +45,7 @@ public:
             p1_index_[p1_hands_[j]] = j;
         }
 
-        pair_count_ =
-            static_cast<int>(p0_hands_.size() * p1_hands_.size());
+        pair_count_ = static_cast<int>(p0_hands_.size() * p1_hands_.size());
 
         flop_equity_.assign(pair_count_, 0.0f);
         flop_computed_.assign(pair_count_, 0);
@@ -137,21 +136,19 @@ private:
         return board.cards[3];
     }
 
-    void ensure_turn_allocated(phevaluator::Card turn_card) {
+    void ensure_turn_allocated(const phevaluator::Card turn_card) {
         validate_card(turn_card);
 
-        TurnCardCache& cache = turn_cache_[turn_card];
-
-        if (!cache.allocated) {
-            cache.equity.assign(pair_count_, 0.0f);
-            cache.computed.assign(pair_count_, 0);
-            cache.allocated = true;
+        if (auto&[equity, computed, allocated] = turn_cache_[turn_card]; !allocated) {
+            equity.assign(pair_count_, 0.0f);
+            computed.assign(pair_count_, 0);
+            allocated = true;
         }
     }
 
     float flop_equity(
-        HandId p0,
-        HandId p1,
+        const HandId p0,
+        const HandId p1,
         const Board& board,
         const PrivateState& private_state
     ) {

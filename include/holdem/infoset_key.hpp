@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "action.hpp"
 
 namespace poker::holdem {
 
