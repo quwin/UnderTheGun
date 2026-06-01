@@ -2,7 +2,6 @@
 
 #include "holdem/private_state.hpp"
 #include "holdem/public_state.hpp"
-#include "holdem/street.hpp"
 #include "holdem/terminal_utility.hpp"
 
 #include "poker/board.hpp"
@@ -53,29 +52,22 @@ poker::holdem::PrivateState private_state(
 
 poker::holdem::PublicState make_base_river_state() {
     poker::holdem::PublicState state;
-
-    state.street = poker::holdem::Street::River;
-
+    // Board: As 7h 2c Jd 4s.
     state.board = poker::Board{
         {
             phevaluator::Card("As"),
             phevaluator::Card("7h"),
-            phevaluator::Card("Jh")
+            phevaluator::Card("2c"),
+            phevaluator::Card("Jd"),
+            phevaluator::Card("4s")
         }
     };
 
     state.pot = 1000;
     state.p0_stack = 2000;
     state.p1_stack = 2000;
-
     state.player_to_act = poker::Player::P0;
-
-    state.terminal = false;
-    state.terminal_reason = poker::holdem::TerminalReason::None;
-    state.folded_player = poker::Player::Terminal;
-    state.winner = poker::Player::Terminal;
-
-    state.action_history.clear();
+    state.terminal_type = poker::TerminalType::None;
     state.betting.reset_for_new_street();
 
     return state;
@@ -85,9 +77,20 @@ float utility_p0(
     const poker::holdem::PublicState& public_state,
     const poker::holdem::PrivateState& private_state
 ) {
+    poker::holdem::AllInEquityCache all_in_equity_cache;
+
+    poker::Range p0_range;
+    poker::Range p1_range;
+
+    p0_range.set_weight(poker::make_hand(private_state.p0_hand), 1.0);
+    p1_range.set_weight(poker::make_hand(private_state.p1_hand), 1.0);
+
+    all_in_equity_cache.initialize_for_subgame(public_state.board, p0_range, p1_range);
+
     return poker::holdem::terminal_utility_p0(
         public_state,
-        private_state
+        private_state,
+        &all_in_equity_cache
     );
 }
 
@@ -107,17 +110,13 @@ void test_p1_folds_to_p0_bet_p0_wins_current_pot_minus_own_commitment() {
     state.p0_stack = 1500;
     state.p1_stack = 2000;
 
-    state.terminal = true;
-    state.terminal_reason = poker::holdem::TerminalReason::Fold;
+    state.terminal_type = poker::TerminalType::P1_Fold;
     state.player_to_act = poker::Player::Terminal;
-    state.folded_player = poker::Player::P1;
-    state.winner = poker::Player::P0;
 
     const poker::holdem::PrivateState priv = private_state(
         poker::HoleCards(phevaluator::Card("Qh"), phevaluator::Card("Kh")),
         poker::HoleCards(phevaluator::Card("9c"), phevaluator::Card("Tc"))
     );
-
     check_near(
         utility_p0(state, priv),
         1000.0,
@@ -146,11 +145,8 @@ void test_p0_folds_to_p1_bet_p0_loses_own_commitment() {
     state.p1_stack = 1500;
     state.betting.add_committed(poker::Player::P1, 500);
 
-    state.terminal = true;
     state.player_to_act = poker::Player::Terminal;
-    state.terminal_reason = poker::holdem::TerminalReason::Fold;
-    state.folded_player = poker::Player::P0;
-    state.winner = poker::Player::P1;
+    state.terminal_type = poker::TerminalType::P0_Fold;
 
     const poker::holdem::PrivateState priv = private_state(
         poker::HoleCards(phevaluator::Card("Qh"), phevaluator::Card("Kh")),
@@ -184,11 +180,8 @@ void test_p0_folds_after_calling_or_raising_loses_own_commitment() {
     state.p0_stack = 1200;
     state.p1_stack = 400;
 
-    state.terminal = true;
     state.player_to_act = poker::Player::Terminal;
-    state.terminal_reason = poker::holdem::TerminalReason::Fold;
-    state.folded_player = poker::Player::P0;
-    state.winner = poker::Player::P1;
+    state.terminal_type = poker::TerminalType::P0_Fold;
 
     const poker::holdem::PrivateState priv = private_state(
         poker::HoleCards(phevaluator::Card("Qh"), phevaluator::Card("Kh")),
@@ -207,7 +200,6 @@ void test_p0_folds_after_calling_or_raising_loses_own_commitment() {
 
 void test_p0_wins_showdown_gets_pot_minus_own_commitment() {
     poker::holdem::PublicState state = make_base_river_state();
-
     // Board: As 7h 2c Jd 4s.
     // P0: Ah Kh -> pair of aces.
     // P1: Tc 9c -> ace-high board only.
@@ -221,11 +213,8 @@ void test_p0_wins_showdown_gets_pot_minus_own_commitment() {
     state.p0_stack = 1500;
     state.p1_stack = 1500;
 
-    state.terminal = true;
     state.player_to_act = poker::Player::Terminal;
-    state.terminal_reason = poker::holdem::TerminalReason::Showdown;
-    state.folded_player = poker::Player::Terminal;
-    state.winner = poker::Player::Terminal;
+    state.terminal_type = poker::TerminalType::Showdown;
 
     const poker::holdem::PrivateState priv = private_state(
         poker::HoleCards(phevaluator::Card("Qh"), phevaluator::Card("Kh")),
@@ -257,15 +246,12 @@ void test_p0_loses_showdown_loses_own_commitment() {
     state.p0_stack = 1500;
     state.p1_stack = 1500;
 
-    state.terminal = true;
     state.player_to_act = poker::Player::Terminal;
-    state.terminal_reason = poker::holdem::TerminalReason::Showdown;
-    state.folded_player = poker::Player::Terminal;
-    state.winner = poker::Player::Terminal;
+    state.terminal_type = poker::TerminalType::Showdown;
 
     const poker::holdem::PrivateState priv = private_state(
         poker::HoleCards(phevaluator::Card("Qh"), phevaluator::Card("Kh")),
-        poker::HoleCards(phevaluator::Card("9c"), phevaluator::Card("Tc"))
+        poker::HoleCards(phevaluator::Card("Ac"), phevaluator::Card("Tc"))
     );
 
     check_near(
@@ -303,11 +289,8 @@ void test_showdown_tie_splits_pot() {
     state.betting.add_committed(poker::Player::P0, 500);
     state.betting.add_committed(poker::Player::P1, 500);
 
-    state.terminal = true;
     state.player_to_act = poker::Player::Terminal;
-    state.terminal_reason = poker::holdem::TerminalReason::Showdown;
-    state.folded_player = poker::Player::Terminal;
-    state.winner = poker::Player::Terminal;
+    state.terminal_type = poker::TerminalType::Showdown;
 
     const poker::holdem::PrivateState priv = private_state(
         poker::HoleCards(phevaluator::Card("2h"), phevaluator::Card("3h")),
@@ -337,11 +320,8 @@ void test_all_in_showdown_win_uses_full_terminal_pot() {
     state.p0_stack = 0;
     state.p1_stack = 0;
 
-    state.terminal = true;
     state.player_to_act = poker::Player::Terminal;
-    state.terminal_reason = poker::holdem::TerminalReason::Showdown;
-    state.folded_player = poker::Player::Terminal;
-    state.winner = poker::Player::Terminal;
+    state.terminal_type = poker::TerminalType::Showdown;
 
     const poker::holdem::PrivateState priv = private_state(
        poker::HoleCards(phevaluator::Card("Ah"), phevaluator::Card("Kh")),
@@ -361,8 +341,7 @@ void test_all_in_showdown_win_uses_full_terminal_pot() {
 void test_terminal_utility_rejects_nonterminal_state() {
     poker::holdem::PublicState state = make_base_river_state();
 
-    state.terminal = false;
-    state.terminal_reason = poker::holdem::TerminalReason::None;
+    state.terminal_type = poker::TerminalType::None;
 
     const poker::holdem::PrivateState priv = private_state(
        poker::HoleCards(phevaluator::Card("Ah"), phevaluator::Card("Kh")),
@@ -388,10 +367,7 @@ void test_terminal_utility_rejects_nonterminal_state() {
 void test_fold_terminal_requires_folded_player() {
     poker::holdem::PublicState state = make_base_river_state();
 
-    state.terminal = true;
-    state.terminal_reason = poker::holdem::TerminalReason::Fold;
-    state.folded_player = poker::Player::Terminal;
-    state.winner = poker::Player::Terminal;
+    state.terminal_type = poker::TerminalType::None;
 
     const poker::holdem::PrivateState priv = private_state(
        poker::HoleCards(phevaluator::Card("Ah"), phevaluator::Card("Kh")),
@@ -426,8 +402,7 @@ void test_showdown_terminal_requires_river_board() {
         }
     };
 
-    state.terminal = true;
-    state.terminal_reason = poker::holdem::TerminalReason::Showdown;
+    state.terminal_type = poker::TerminalType::Showdown;
 
     const poker::holdem::PrivateState priv = private_state(
        poker::HoleCards(phevaluator::Card("Ah"), phevaluator::Card("Kh")),
@@ -444,9 +419,8 @@ void test_showdown_terminal_requires_river_board() {
 
     check(
         threw,
-        "Showdown terminal should require a five-card river board."
+        "Showdown terminal requires five-card board."
     );
-
     std::cout << "[pass] test_showdown_terminal_requires_river_board\n";
 }
 
