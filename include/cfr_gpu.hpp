@@ -38,6 +38,9 @@ struct GpuCfrConfig {
     bool synchronize_each_iteration = false;
     // Terminal evaluation mode.
     GpuTerminalMode terminal_mode = GpuTerminalMode::HostPrecomputed;
+    // 0 means auto-select from available VRAM.
+    int pair_chunk_size = 0;
+    double vram_usage_fraction = 0.85;
     std::string evaluator_data_dir = "../external/CUDA-Poker-Calculator/src/resources";
 };
 
@@ -366,50 +369,22 @@ struct DevicePublicCfrState {
 };
 
 // -----------------------------------------------------------------------------
-// Temporary per-iteration work buffers
+// Per-iteration work buffers
 // -----------------------------------------------------------------------------
-
 struct DevicePublicWorkBuffers {
     // ---------------------------------------------------------------------
     // Pair-level node values.
     // ---------------------------------------------------------------------
     //
     // In exact public-tree CFR, terminal values depend on private hand pair.
+    // The most direct layout is: node_pair_value[node_id * hand_pair_count + pair_id]
+    // This can be large, but is the clearest validation layout.
+    // Per-depth rolling buffers have been experimented with,
+    // but increase computation speeds Quadratically, and as such have been ruled out
     //
-    // The most direct layout is:
-    //
-    //   node_pair_value[node_id * hand_pair_count + pair_id]
-    //
-    // This can be large, but is the clearest validation layout. Later you can
-    // replace it with per-depth rolling buffers.
-
     float* d_node_pair_value_p0 = nullptr;
-    float* d_node_pair_value_p0_next = nullptr;
 
     std::size_t node_pair_value_entries = 0;
-
-    // ---------------------------------------------------------------------
-    // Action-state tensor values.
-    // ---------------------------------------------------------------------
-    //
-    // Length = tensor_entries.
-    //
-    //   action_value[
-    //       tensor_offset[state]
-    //     + bucket * action_count
-    //     + local_action
-    //   ]
-
-    float* d_action_value_p0 = nullptr;
-
-    // ---------------------------------------------------------------------
-    // State-bucket values / reaches.
-    // ---------------------------------------------------------------------
-    //
-    // Length = state_bucket_entries.
-
-    float* d_state_bucket_value_p0 = nullptr;
-
     // Pair-level forward reaches.
     //
     // Layout:
@@ -427,7 +402,6 @@ struct DevicePublicWorkBuffers {
     float* d_node_pair_reach_p0 = nullptr;
     float* d_node_pair_reach_p1 = nullptr;
     float* d_node_pair_reach_chance = nullptr;
-
     // State-bucket reaches.
     //
     // Layout:
@@ -436,8 +410,10 @@ struct DevicePublicWorkBuffers {
     //       action_state_bucket_offset[state] + bucket
     //
     // Used by regret update and average-strategy accumulation.
-    float* d_state_bucket_cf_reach = nullptr;
     float* d_state_bucket_own_reach = nullptr;
+    // Accumulated across all chunks, applied once per iteration.
+    float* d_regret_delta = nullptr;
+    int pair_chunk_size = 0;
 };
 
 // -----------------------------------------------------------------------------
@@ -570,13 +546,27 @@ private:
     // Iteration stages
     // ---------------------------------------------------------------------
 
-    void run_terminal_evaluation_pass() const;
+    void run_terminal_evaluation_pass_for_chunk(int pair_start, int active_pair_count) const;
 
-    void run_backward_value_pass();
+    void run_backward_value_pass_for_chunk(
+        int pair_start,
+        int active_pair_count
+    ) const;
 
-    void run_reach_pass();
+    void run_reach_pass_for_chunk(
+        int pair_start,
+        int active_pair_count
+    ) const;
 
-    void run_regret_update_pass();
+    void clear_iteration_accumulators() const;
+
+    void clear_chunk_node_buffers(int active_pair_count) const;
+
+    void run_action_value_pass_for_chunk(int pair_start, int active_pair_count) const;
+
+    void accumulate_regret_deltas_for_chunk(int pair_start, int active_pair_count) const;
+
+    void apply_regret_deltas() const;
 
     void run_average_strategy_accumulation_pass();
 

@@ -140,10 +140,6 @@ std::size_t checked_mul(
     return a * b;
 }
 
-std::uint64_t to_u64(std::size_t value) {
-    return static_cast<std::uint64_t>(value);
-}
-
 int player_to_int(Player player) {
     return static_cast<int>(player);
 }
@@ -152,10 +148,31 @@ int node_type_to_int(PublicNodeType type) {
     return static_cast<int>(type);
 }
 
-bool is_real_player(Player player) {
-    return player == Player::P0 || player == Player::P1;
-}
+std::size_t choose_pair_chunk_size_full_tree(
+    const std::size_t free_bytes,
+    const int num_nodes,
+    const int total_hand_pairs,
+    const double usable_fraction
+) {
+    if (num_nodes <= 0 || total_hand_pairs <= 0) {
+        throw std::invalid_argument("Invalid chunk sizing inputs.");
+    }
 
+    // Chunk-local full-tree buffers:
+    //   value
+    //   reach_p0
+    //   reach_p1
+    //   reach_chance
+    // = 4 float buffers per node/pair.
+    constexpr std::size_t bytes_per_node_pair = 4 * sizeof(float);
+
+    const double usable = static_cast<double>(free_bytes) * usable_fraction;
+    const double bytes_per_pair = static_cast<double>(num_nodes) * static_cast<double>(bytes_per_node_pair);
+    auto chunk = static_cast<std::size_t>(usable / bytes_per_pair);
+    chunk = std::max<std::size_t>(1, chunk);
+    chunk = std::min<std::size_t>(chunk,static_cast<std::size_t>(total_hand_pairs));
+    return std::max<std::size_t>(1, chunk);
+}
 } // namespace
 
 // -----------------------------------------------------------------------------
@@ -388,30 +405,9 @@ GpuCfrSolver::~GpuCfrSolver() {
 // -----------------------------------------------------------------------------
 // Debug Helpers
 // -----------------------------------------------------------------------------
-std::vector<float> GpuCfrSolver::debug_action_value_p0() const {
-    return copy_tensor_from_device(
-        gpu_.work.d_action_value_p0,
-        gpu_.flat.tensor_entries
-    );
-}
-
-std::vector<float> GpuCfrSolver::debug_state_bucket_cf_reach() const {
-    return copy_tensor_from_device(
-        gpu_.work.d_state_bucket_cf_reach,
-        gpu_.flat.state_bucket_entries
-    );
-}
-
 std::vector<float> GpuCfrSolver::debug_state_bucket_own_reach() const {
     return copy_tensor_from_device(
         gpu_.work.d_state_bucket_own_reach,
-        gpu_.flat.state_bucket_entries
-    );
-}
-
-std::vector<float> GpuCfrSolver::debug_state_bucket_value_p0() const {
-    return copy_tensor_from_device(
-        gpu_.work.d_state_bucket_value_p0,
         gpu_.flat.state_bucket_entries
     );
 }
@@ -457,9 +453,7 @@ void GpuCfrSolver::debug_dump_action_value_launch_inputs() const {
         << "ptr d_node_pair_value_p0=" << work.d_node_pair_value_p0 << "\n"
         << "ptr d_node_pair_reach_p0=" << work.d_node_pair_reach_p0 << "\n"
         << "ptr d_node_pair_reach_p1=" << work.d_node_pair_reach_p1 << "\n"
-        << "ptr d_node_pair_reach_chance=" << work.d_node_pair_reach_chance << "\n"
-        << "ptr d_state_bucket_cf_reach=" << work.d_state_bucket_cf_reach << "\n"
-        << "ptr d_action_value_p0=" << work.d_action_value_p0 << "\n";
+        << "ptr d_node_pair_reach_chance=" << work.d_node_pair_reach_chance << "\n";
 
     const int root = flat.root;
     const PublicNode& root_node = game_.node(root);
@@ -632,10 +626,6 @@ void GpuCfrSolver::release() {
     cuda_free_ptr(cfr.d_strategy_weight_sum);
 
     cuda_free_ptr(work.d_node_pair_value_p0);
-    cuda_free_ptr(work.d_node_pair_value_p0_next);
-    cuda_free_ptr(work.d_action_value_p0);
-    cuda_free_ptr(work.d_state_bucket_value_p0);
-    cuda_free_ptr(work.d_state_bucket_cf_reach);
     cuda_free_ptr(work.d_state_bucket_own_reach);
     cuda_free_ptr(work.d_node_pair_reach_p0);
     cuda_free_ptr(work.d_node_pair_reach_p1);
@@ -817,60 +807,77 @@ void GpuCfrSolver::allocate_cfr_state() {
     );
 }
 
-    void GpuCfrSolver::allocate_work_buffers() {
+void GpuCfrSolver::allocate_work_buffers() {
     DevicePublicWorkBuffers& work = gpu_.work;
+    int pair_chunk_size = config_.pair_chunk_size;
+    if (pair_chunk_size <= 0) {
+        std::size_t free_bytes = 0;
+        std::size_t total_bytes = 0;
+        check_cuda(
+            cudaMemGetInfo(&free_bytes, &total_bytes),
+            "cudaMemGetInfo failed"
+        );
+        pair_chunk_size = static_cast<int>(
+            choose_pair_chunk_size_full_tree(
+                free_bytes,
+                gpu_.flat.num_nodes,
+                gpu_.hands.hand_pair_count,
+                config_.vram_usage_fraction
+            )
+        );
+    }
+    pair_chunk_size = std::min(pair_chunk_size,gpu_.hands.hand_pair_count);
 
+    if (pair_chunk_size <= 0) {
+        throw std::runtime_error("Invalid pair_chunk_size.");
+    }
+    work.pair_chunk_size = pair_chunk_size;
     work.node_pair_value_entries =
         checked_mul(
             static_cast<std::size_t>(gpu_.flat.num_nodes),
-            static_cast<std::size_t>(gpu_.hands.hand_pair_count),
-            "node_pair_value_entries"
+            static_cast<std::size_t>(pair_chunk_size),
+            "chunked_node_pair_entries"
         );
 
     cuda_alloc_zero(
         &work.d_node_pair_value_p0,
         work.node_pair_value_entries
     );
-
-    cuda_alloc_zero(
-        &work.d_node_pair_value_p0_next,
-        work.node_pair_value_entries
-    );
-
     cuda_alloc_zero(
         &work.d_node_pair_reach_p0,
         work.node_pair_value_entries
     );
-
     cuda_alloc_zero(
         &work.d_node_pair_reach_p1,
         work.node_pair_value_entries
     );
-
     cuda_alloc_zero(
         &work.d_node_pair_reach_chance,
         work.node_pair_value_entries
     );
-
-    cuda_alloc_zero(
-        &work.d_action_value_p0,
-        gpu_.flat.tensor_entries
-    );
-
-    cuda_alloc_zero(
-        &work.d_state_bucket_value_p0,
-        gpu_.flat.state_bucket_entries
-    );
-
-    cuda_alloc_zero(
-        &work.d_state_bucket_cf_reach,
-        gpu_.flat.state_bucket_entries
-    );
-
     cuda_alloc_zero(
         &work.d_state_bucket_own_reach,
         gpu_.flat.state_bucket_entries
     );
+    cuda_alloc_zero(
+        &work.d_regret_delta,
+        gpu_.flat.tensor_entries
+    );
+
+    std::cerr
+        << "[chunked work] num_nodes=" << gpu_.flat.num_nodes
+        << " hand_pair_count=" << gpu_.hands.hand_pair_count
+        << " pair_chunk_size=" << work.pair_chunk_size
+        << " node_pair_entries=" << work.node_pair_value_entries
+        << " node_pair_buffer_mib="
+        << static_cast<double>(
+               work.node_pair_value_entries * sizeof(float)
+           ) / (1024.0 * 1024.0)
+        << " total_4_buffers_mib="
+        << static_cast<double>(
+               work.node_pair_value_entries * sizeof(float) * 5
+           ) / (1024.0 * 1024.0)
+        << "\n";
 }
 
 void GpuCfrSolver::initialize_strategy() const {
@@ -908,15 +915,32 @@ void GpuCfrSolver::run_iterations(int iterations) {
 }
 
 void GpuCfrSolver::run_one_iteration() {
-    run_terminal_evaluation_pass();
-    run_backward_value_pass();
-    run_reach_pass();
-    run_regret_update_pass();
+    clear_iteration_accumulators();
+    const int total_pairs = gpu_.hand_data.hand_pair_count;
+    const int chunk_size = gpu_.work.pair_chunk_size;
+    for (int pair_start = 0; pair_start < total_pairs; pair_start += chunk_size) {
+        const int active_pair_count =std::min(chunk_size, total_pairs - pair_start);
+        run_terminal_evaluation_pass_for_chunk(
+            pair_start,
+            active_pair_count
+        );
+        run_backward_value_pass_for_chunk(
+            pair_start,
+            active_pair_count
+        );
+        run_reach_pass_for_chunk(
+            pair_start,
+            active_pair_count
+        );
+        accumulate_regret_deltas_for_chunk(
+            pair_start,
+            active_pair_count
+        );
+    }
     run_average_strategy_accumulation_pass();
+    apply_regret_deltas();
     run_strategy_update_pass();
-
     ++stats_.iterations_run;
-
     if (config_.synchronize_each_iteration) {
         check_cuda(
             cudaDeviceSynchronize(),
@@ -933,37 +957,23 @@ void GpuCfrSolver::run_one_iteration() {
 // -----------------------------------------------------------------------------
 // Iteration stages
 // -----------------------------------------------------------------------------
+    void GpuCfrSolver::run_terminal_evaluation_pass_for_chunk(
+        int pair_start,
+        int active_pair_count
+    ) const {
+    clear_chunk_node_buffers(active_pair_count);
 
-void GpuCfrSolver::run_terminal_evaluation_pass() const {
     KernelLaunchConfig launch;
     launch.threads_per_block = config_.threads_per_block;
-    if (config_.terminal_mode == GpuTerminalMode::HostPrecomputed) {
-        if (!terminal_values_uploaded_) {
-            throw std::logic_error(
-                "HostPrecomputed terminal mode requires uploaded terminal values."
-            );
-        }
-        launch_load_precomputed_terminal_pair_values(
-            launch,
-            gpu_.game.num_nodes,
-            gpu_.hand_data.hand_pair_count,
-            gpu_.terminal_data.terminal_count,
-            gpu_.terminal_data.d_terminal_index_by_node,
-            gpu_.terminal_data.d_terminal_value_p0,
-            gpu_.work.d_node_pair_value_p0
-        );
-        check_cuda(
-            cudaGetLastError(),
-            "launch_load_precomputed_terminal_pair_values failed"
-        );
-        return;
-    }
-    if (config_.terminal_mode == GpuTerminalMode::DeviceComputed) {
-        launch_compute_terminal_pair_values_from_records(
-            launch,
 
+    if (config_.terminal_mode == GpuTerminalMode::DeviceComputed) {
+        launch_compute_terminal_pair_values_from_records_chunk(
+            launch,
             gpu_.terminal_data.terminal_count,
-            gpu_.hand_data.hand_pair_count,
+
+            pair_start,
+            active_pair_count,
+            gpu_.work.pair_chunk_size,
 
             gpu_.terminal_data.d_terminal_nodes,
             gpu_.terminal_data.d_terminal_type,
@@ -988,14 +998,24 @@ void GpuCfrSolver::run_terminal_evaluation_pass() const {
 
             gpu_.work.d_node_pair_value_p0
         );
+
         check_cuda(
             cudaGetLastError(),
-            "launch_compute_terminal_pair_values_from_records failed"
+            "launch_compute_terminal_pair_values_from_records_chunk failed"
         );
+
+        return;
     }
+
+    throw std::logic_error(
+        "Chunked HostPrecomputed requires a chunked terminal loader or DeviceComputed."
+    );
 }
 
-void GpuCfrSolver::run_backward_value_pass() {
+void GpuCfrSolver::run_backward_value_pass_for_chunk(
+    const int pair_start,
+    const int active_pair_count
+) const {
     KernelLaunchConfig launch;
     launch.threads_per_block = config_.threads_per_block;
 
@@ -1007,113 +1027,59 @@ void GpuCfrSolver::run_backward_value_pass() {
             continue;
         }
 
-        launch_public_backward_pair_value_level(
+        launch_public_backward_pair_value_level_chunk(
             launch,
             edges,
+
             gpu_.game.d_node_type,
             gpu_.game.d_player,
             gpu_.game.d_action_state_index,
+
             gpu_.game.d_action_state_action_count,
             gpu_.game.d_action_state_tensor_offset,
+
             gpu_.hand_data.d_p0_pair_index,
             gpu_.hand_data.d_p1_pair_index,
             gpu_.hand_data.d_p0_bucket_by_hand_index,
             gpu_.hand_data.d_p1_bucket_by_hand_index,
+
             gpu_.cfr.d_sigma,
 
-            // Read child values from the same full node-value table.
+            // Read already-computed child values.
             gpu_.work.d_node_pair_value_p0,
 
-            // Write parent values back into the same table.
+            // Accumulate parent values into the same buffer.
             gpu_.work.d_node_pair_value_p0,
 
-            gpu_.hand_data.hand_pair_count
+            pair_start,
+            active_pair_count,
+            gpu_.work.pair_chunk_size
         );
 
         check_cuda(
             cudaGetLastError(),
-            "launch_public_backward_pair_value_level failed"
+            "launch_public_backward_pair_value_level_chunk failed"
         );
     }
-
-    check_cuda(
-        cudaMemcpy(
-            &stats_.last_root_value_p0,
-            gpu_.work.d_node_pair_value_p0 +
-                gpu_.game.root * gpu_.hand_data.hand_pair_count,
-            sizeof(float),
-            cudaMemcpyDeviceToHost
-        ),
-        "Failed to copy diagnostic root pair value"
-    );
 }
 
-void GpuCfrSolver::run_reach_pass() {
+void GpuCfrSolver::run_reach_pass_for_chunk(
+    const int pair_start,
+    const int active_pair_count
+) const {
     KernelLaunchConfig launch;
     launch.threads_per_block = config_.threads_per_block;
 
-    // Clear pair-level reaches.
-    launch_fill_float(
-        launch,
-        gpu_.work.d_node_pair_reach_p0,
-        0.0f,
-        gpu_.work.node_pair_value_entries
-    );
-
-    launch_fill_float(
-        launch,
-        gpu_.work.d_node_pair_reach_p1,
-        0.0f,
-        gpu_.work.node_pair_value_entries
-    );
-
-    launch_fill_float(
-        launch,
-        gpu_.work.d_node_pair_reach_chance,
-        0.0f,
-        gpu_.work.node_pair_value_entries
-    );
-
-    // Clear state-bucket reaches.
-    launch_fill_float(
-        launch,
-        gpu_.work.d_state_bucket_cf_reach,
-        0.0f,
-        gpu_.flat.state_bucket_entries
-    );
-
-    launch_fill_float(
-        launch,
-        gpu_.work.d_state_bucket_own_reach,
-        0.0f,
-        gpu_.flat.state_bucket_entries
-    );
-
-    check_cuda(
-        cudaGetLastError(),
-        "Failed to clear reach buffers"
-    );
-
-    // Root reach:
-    //
-    //   reach_p0[root,pair] = 1
-    //   reach_p1[root,pair] = 1
-    //   reach_chance[root,pair] = 1
-    launch_initialize_public_pair_reaches(
+    launch_initialize_public_pair_reaches_chunk(
         launch,
         gpu_.game.root,
-        gpu_.hand_data.hand_pair_count,
+        active_pair_count,
+        gpu_.work.pair_chunk_size,
         gpu_.work.d_node_pair_reach_p0,
         gpu_.work.d_node_pair_reach_p1,
         gpu_.work.d_node_pair_reach_chance
     );
 
-    check_cuda(
-        cudaGetLastError(),
-        "launch_initialize_public_pair_reaches failed"
-    );
-
-    // Forward pass through public tree.
     for (int depth = 0; depth < gpu_.game.max_depth; ++depth) {
         const DevicePublicLevelEdges& edges =
             gpu_.game.level_edges[static_cast<std::size_t>(depth)];
@@ -1122,111 +1088,247 @@ void GpuCfrSolver::run_reach_pass() {
             continue;
         }
 
-        launch_public_forward_pair_reach_level(
+        launch_public_forward_pair_reach_level_chunk(
             launch,
             edges,
+
             gpu_.game.d_node_type,
             gpu_.game.d_player,
             gpu_.game.d_action_state_index,
+
             gpu_.game.d_action_state_action_count,
             gpu_.game.d_action_state_tensor_offset,
+
             gpu_.hand_data.d_p0_pair_index,
             gpu_.hand_data.d_p1_pair_index,
             gpu_.hand_data.d_p0_bucket_by_hand_index,
             gpu_.hand_data.d_p1_bucket_by_hand_index,
+
             gpu_.cfr.d_sigma,
+
             gpu_.work.d_node_pair_reach_p0,
             gpu_.work.d_node_pair_reach_p1,
             gpu_.work.d_node_pair_reach_chance,
-            gpu_.hand_data.hand_pair_count
-        );
 
-        check_cuda(
-            cudaGetLastError(),
-            "launch_public_forward_pair_reach_level failed"
+            pair_start,
+            active_pair_count,
+            gpu_.work.pair_chunk_size
         );
     }
 
-    // Aggregate pair-level reaches into state-bucket reaches.
-    launch_public_aggregate_state_bucket_reaches(
+    launch_public_aggregate_state_bucket_reaches_chunk(
         launch,
+
         gpu_.game.d_action_state_node,
         gpu_.game.d_action_state_player,
         gpu_.game.d_action_state_bucket_count,
         gpu_.game.d_action_state_bucket_offset,
-        gpu_.hand_data.hand_pair_count,
+
+        pair_start,
+        active_pair_count,
+        gpu_.work.pair_chunk_size,
+
         gpu_.hand_data.d_p0_pair_index,
         gpu_.hand_data.d_p1_pair_index,
         gpu_.hand_data.d_p0_bucket_by_hand_index,
         gpu_.hand_data.d_p1_bucket_by_hand_index,
+
         gpu_.work.d_node_pair_reach_p0,
         gpu_.work.d_node_pair_reach_p1,
         gpu_.work.d_node_pair_reach_chance,
-        gpu_.work.d_state_bucket_cf_reach,
+
         gpu_.work.d_state_bucket_own_reach,
+
         gpu_.game.num_action_states
     );
 
     check_cuda(
         cudaGetLastError(),
-        "launch_public_aggregate_state_bucket_reaches failed"
+        "run_reach_pass_for_chunk failed"
     );
 }
 
-void GpuCfrSolver::run_regret_update_pass() {
+void GpuCfrSolver::clear_iteration_accumulators() const {
+    KernelLaunchConfig launch;
+    launch.threads_per_block = config_.threads_per_block;
+    launch_fill_float(
+        launch,
+        gpu_.work.d_state_bucket_own_reach,
+        0.0f,
+        gpu_.flat.state_bucket_entries
+    );
+    launch_fill_float(
+        launch,
+        gpu_.work.d_regret_delta,
+        0.0f,
+        gpu_.flat.tensor_entries
+    );
+    check_cuda(
+        cudaGetLastError(),
+        "clear_iteration_accumulators failed"
+    );
+}
+void GpuCfrSolver::clear_chunk_node_buffers(
+    const int active_pair_count
+) const {
+    if (active_pair_count <= 0 ||
+        active_pair_count > gpu_.work.pair_chunk_size) {
+        throw std::invalid_argument(
+            "clear_chunk_node_buffers received invalid active_pair_count."
+        );
+    }
     KernelLaunchConfig launch;
     launch.threads_per_block = config_.threads_per_block;
 
-    // debug_dump_action_value_launch_inputs();
+    const std::size_t entries = gpu_.work.node_pair_value_entries;
 
-    launch_public_compute_action_values_from_pair_values(
+    launch_fill_float(
         launch,
-        gpu_.game.action_edges,
-        gpu_.game.d_action_state_player,
-        gpu_.game.d_action_state_bucket_count,
-        gpu_.game.d_action_state_action_count,
-        gpu_.game.d_action_state_tensor_offset,
-        gpu_.game.d_action_state_bucket_offset,
-        gpu_.hand_data.hand_pair_count,
-        gpu_.hand_data.d_p0_pair_index,
-        gpu_.hand_data.d_p1_pair_index,
-        gpu_.hand_data.d_p0_bucket_by_hand_index,
-        gpu_.hand_data.d_p1_bucket_by_hand_index,
         gpu_.work.d_node_pair_value_p0,
+        0.0f,
+        entries
+    );
+
+    launch_fill_float(
+        launch,
         gpu_.work.d_node_pair_reach_p0,
+        0.0f,
+        entries
+    );
+
+    launch_fill_float(
+        launch,
         gpu_.work.d_node_pair_reach_p1,
+        0.0f,
+        entries
+    );
+
+    launch_fill_float(
+        launch,
         gpu_.work.d_node_pair_reach_chance,
-        gpu_.work.d_state_bucket_cf_reach,
-        gpu_.work.d_action_value_p0
+        0.0f,
+        entries
     );
 
     check_cuda(
         cudaGetLastError(),
-        "launch_public_compute_action_values_from_pair_values failed"
+        "clear_chunk_node_buffers failed"
     );
+}
+//  No longer used, regrets are determined directly from reaches
+//
+// void GpuCfrSolver::run_action_value_pass_for_chunk(
+//     int pair_start,
+//     int active_pair_count
+// ) const {
+//     if (pair_start < 0 ||
+//         active_pair_count <= 0 ||
+//         active_pair_count > gpu_.work.pair_chunk_size ||
+//         pair_start + active_pair_count > gpu_.hand_data.hand_pair_count) {
+//         throw std::invalid_argument(
+//             "run_action_value_pass_for_chunk received invalid pair range."
+//         );
+//         }
+//
+//     KernelLaunchConfig launch;
+//     launch.threads_per_block = config_.threads_per_block;
+//
+//     launch_public_compute_action_values_from_pair_values_chunk(
+//         launch,
+//
+//         gpu_.game.action_edges,
+//
+//         gpu_.game.d_action_state_player,
+//         gpu_.game.d_action_state_bucket_count,
+//         gpu_.game.d_action_state_action_count,
+//         gpu_.game.d_action_state_tensor_offset,
+//         gpu_.game.d_action_state_bucket_offset,
+//
+//         gpu_.hand_data.d_p0_pair_index,
+//         gpu_.hand_data.d_p1_pair_index,
+//         gpu_.hand_data.d_p0_bucket_by_hand_index,
+//         gpu_.hand_data.d_p1_bucket_by_hand_index,
+//
+//         gpu_.work.d_node_pair_value_p0,
+//         gpu_.work.d_node_pair_reach_p0,
+//         gpu_.work.d_node_pair_reach_p1,
+//         gpu_.work.d_node_pair_reach_chance,
+//
+//         pair_start,
+//         active_pair_count,
+//         gpu_.work.pair_chunk_size
+//     );
+//
+//     check_cuda(
+//         cudaGetLastError(),
+//         "launch_public_compute_action_values_from_pair_values_chunk failed"
+//     );
+// }
+void GpuCfrSolver::accumulate_regret_deltas_for_chunk(
+    int pair_start,
+    int active_pair_count
+) const {
+    if (pair_start < 0 ||
+        active_pair_count <= 0 ||
+        active_pair_count > gpu_.work.pair_chunk_size ||
+        pair_start + active_pair_count > gpu_.hand_data.hand_pair_count) {
+        throw std::invalid_argument(
+            "accumulate_regret_deltas_for_chunk received invalid pair range."
+        );
+        }
 
-    launch_public_update_regrets(
+    KernelLaunchConfig launch;
+    launch.threads_per_block = config_.threads_per_block;
+
+    launch_public_accumulate_regret_deltas_for_chunk(
         launch,
+
+        gpu_.game.action_edges,
+
         gpu_.game.d_action_state_player,
         gpu_.game.d_action_state_bucket_count,
         gpu_.game.d_action_state_action_count,
         gpu_.game.d_action_state_tensor_offset,
-        gpu_.game.d_action_state_bucket_offset,
-        gpu_.work.d_action_value_p0,
-        gpu_.work.d_state_bucket_value_p0,
-        gpu_.work.d_state_bucket_cf_reach,
-        gpu_.cfr.d_sigma,
+
+        gpu_.hand_data.d_p0_pair_index,
+        gpu_.hand_data.d_p1_pair_index,
+        gpu_.hand_data.d_p0_bucket_by_hand_index,
+        gpu_.hand_data.d_p1_bucket_by_hand_index,
+
+        gpu_.work.d_node_pair_value_p0,
+        gpu_.work.d_node_pair_reach_p0,
+        gpu_.work.d_node_pair_reach_p1,
+        gpu_.work.d_node_pair_reach_chance,
+
+        pair_start,
+        active_pair_count,
+        gpu_.work.pair_chunk_size,
+
+        gpu_.work.d_regret_delta
+    );
+
+    check_cuda(
+        cudaGetLastError(),
+        "launch_public_accumulate_regret_deltas_for_chunk failed"
+    );
+}
+void GpuCfrSolver::apply_regret_deltas() const {
+    KernelLaunchConfig launch;
+    launch.threads_per_block = config_.threads_per_block;
+
+    launch_apply_regret_deltas(
+        launch,
         gpu_.cfr.d_regret_sum,
-        gpu_.game.num_action_states,
+        gpu_.work.d_regret_delta,
+        gpu_.flat.tensor_entries,
         config_.use_cfr_plus
     );
 
     check_cuda(
         cudaGetLastError(),
-        "launch_public_update_regrets failed"
+        "launch_apply_regret_deltas failed"
     );
 }
-
 void GpuCfrSolver::run_average_strategy_accumulation_pass() {
     KernelLaunchConfig launch;
     launch.threads_per_block = config_.threads_per_block;

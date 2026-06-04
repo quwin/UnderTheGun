@@ -36,7 +36,7 @@
 #include <vector>
 
 // Native solver headers
-#include "cfr_cpu.hpp"
+// #include "cfr_cpu.hpp"
 #include "game.hpp"
 #include "holdem/action.hpp"
 #include "holdem/betting_abstraction.hpp"
@@ -483,10 +483,10 @@ class Wizard : public Fl_Double_Window {
         poker::GpuCfrConfig cfr_config;
         cfr_config.num_players = 2;
         cfr_config.synchronize_each_iteration = false;
-        cfr_config.threads_per_block = 512;
+        cfr_config.threads_per_block = 256;
         cfr_config.use_cfr_plus = false;
         cfr_config.linear_averaging = false;
-        cfr_config.terminal_mode = poker::GpuTerminalMode::HostPrecomputed;
+        cfr_config.terminal_mode = poker::GpuTerminalMode::DeviceComputed;
 
         poker::GpuCfrSolver solver(*m_game, cfr_config);
         for (int done = 0; done < total;) {
@@ -502,32 +502,32 @@ class Wizard : public Fl_Double_Window {
 
         m_average_strategy = solver.average_strategy();
     } else {
-        poker::CfrConfig cfr_config;
-        cfr_config.num_players = 2;
-        cfr_config.use_cfr_plus = false;
-        cfr_config.linear_averaging = false;
-        cfr_config.simultaneous_updates = true;
-
-        poker::TerminalValueProvider terminal_values;
-
-        poker::CpuCfrSolver solver(
-            *m_game,
-            terminal_values,
-            cfr_config
-        );
-
-        for (int done = 0; done < total;) {
-            const int step = std::min<int>(chunk, total - done);
-
-            solver.run_iterations(step);
-
-            done += step;
-            m_pg5->setIteration(done, total);
-            m_pg5->setProgress(done, total);
-            Fl::check();
-        }
-
-        m_average_strategy = solver.average_strategy();
+    // poker::CfrConfig cfr_config;
+    // cfr_config.num_players = 2;
+    // cfr_config.use_cfr_plus = false;
+    // cfr_config.linear_averaging = false;
+    // cfr_config.simultaneous_updates = true;
+    //
+    // poker::TerminalValueProvider terminal_values;
+    //
+    // poker::CpuCfrSolver solver(
+    //     *m_game,
+    //     terminal_values,
+    //     cfr_config
+    // );
+    //
+    // for (int done = 0; done < total;) {
+    //     const int step = std::min<int>(chunk, total - done);
+    //
+    //     solver.run_iterations(step);
+    //
+    //     done += step;
+    //     m_pg5->setIteration(done, total);
+    //     m_pg5->setProgress(done, total);
+    //     Fl::check();
+    // }
+    //
+    // m_average_strategy = solver.average_strategy();
     }
 
     {

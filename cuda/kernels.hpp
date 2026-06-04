@@ -114,11 +114,13 @@ void launch_load_precomputed_terminal_pair_values(
     cudaStream_t stream = nullptr
 );
 
-void launch_compute_terminal_pair_values_from_records(
+void launch_compute_terminal_pair_values_from_records_chunk(
     const KernelLaunchConfig& config,
 
     int terminal_count,
-    int hand_pair_count,
+    int pair_start,
+    int active_pair_count,
+    int pair_chunk_size,
 
     const int* d_terminal_nodes,
     const int* d_terminal_type,
@@ -173,7 +175,7 @@ void launch_compute_terminal_pair_values_from_records(
 // The kernel should zero/overwrite parent entries for parents represented in
 // this level before accumulating children.
 
-void launch_public_backward_pair_value_level(
+void launch_public_backward_pair_value_level_chunk(
     const KernelLaunchConfig& config,
     const DevicePublicLevelEdges& edges,
 
@@ -193,11 +195,13 @@ void launch_public_backward_pair_value_level(
 
     // Read child values from here.
     const float* d_node_pair_value_read,
-
     // Write parent values here.
     float* d_node_pair_value_write,
 
-    int hand_pair_count,
+    int pair_start,
+    int active_pair_count,
+    int pair_chunk_size,
+
     cudaStream_t stream = nullptr
 );
 
@@ -208,10 +212,6 @@ void launch_public_backward_pair_value_level(
 // Computes per-action-state bucket reaches used for regret and average strategy.
 //
 // Outputs:
-//
-//   d_state_bucket_cf_reach[
-//       action_state_bucket_offset[state] + bucket
-//   ]
 //
 //   d_state_bucket_own_reach[
 //       action_state_bucket_offset[state] + bucket
@@ -228,17 +228,18 @@ void launch_public_backward_pair_value_level(
 //   P1 bucket:
 //      d_p1_bucket_by_hand_index[d_p1_pair_index[pair]]
 
-    void launch_initialize_public_pair_reaches(
+    void launch_initialize_public_pair_reaches_chunk(
         const KernelLaunchConfig& config,
         int root,
-        int hand_pair_count,
+        int active_pair_count,
+        int pair_chunk_size,
         float* d_node_pair_reach_p0,
         float* d_node_pair_reach_p1,
         float* d_node_pair_reach_chance,
         cudaStream_t stream = nullptr
     );
 
-    void launch_public_forward_pair_reach_level(
+    void launch_public_forward_pair_reach_level_chunk(
         const KernelLaunchConfig& config,
         const DevicePublicLevelEdges& edges,
 
@@ -260,11 +261,15 @@ void launch_public_backward_pair_value_level(
         float* d_node_pair_reach_p1,
         float* d_node_pair_reach_chance,
 
-        int hand_pair_count,
+        int pair_start,
+        int active_pair_count,
+        int pair_chunk_size,
+
         cudaStream_t stream = nullptr
     );
 
-    void launch_public_aggregate_state_bucket_reaches(
+    void launch_public_aggregate_state_bucket_reaches_chunk
+    (
         const KernelLaunchConfig& config,
 
         const int* d_action_state_node,
@@ -272,7 +277,10 @@ void launch_public_backward_pair_value_level(
         const int* d_action_state_bucket_count,
         const std::uint64_t* d_action_state_bucket_offset,
 
-        int hand_pair_count,
+        int pair_start,
+        int active_pair_count,
+        int pair_chunk_size,
+
         const int* d_p0_pair_index,
         const int* d_p1_pair_index,
         const int* d_p0_bucket_by_hand_index,
@@ -282,7 +290,6 @@ void launch_public_backward_pair_value_level(
         const float* d_node_pair_reach_p1,
         const float* d_node_pair_reach_chance,
 
-        float* d_state_bucket_cf_reach,
         float* d_state_bucket_own_reach,
 
         int num_action_states,
@@ -305,34 +312,36 @@ void launch_public_backward_pair_value_level(
 // aggregate or average appropriately. For exact-domain mode, each bucket is one
 // exact hand index, but there are still multiple opponent hands per bucket.
 
-    void launch_public_compute_action_values_from_pair_values(
-        const KernelLaunchConfig& config,
+void launch_public_compute_action_values_from_pair_values_chunk(
+    const KernelLaunchConfig& config,
 
-        const DevicePublicActionEdges& action_edges,
+    const DevicePublicActionEdges& action_edges,
 
-        const int* d_action_state_player,
-        const int* d_action_state_bucket_count,
-        const int* d_action_state_action_count,
-        const std::uint64_t* d_action_state_tensor_offset,
-        const std::uint64_t* d_action_state_bucket_offset,
+    const int* d_action_state_player,
+    const int* d_action_state_bucket_count,
+    const int* d_action_state_action_count,
+    const std::uint64_t* d_action_state_tensor_offset,
+    const std::uint64_t* d_action_state_bucket_offset,
 
-        int hand_pair_count,
-        const int* d_p0_pair_index,
-        const int* d_p1_pair_index,
-        const int* d_p0_bucket_by_hand_index,
-        const int* d_p1_bucket_by_hand_index,
+    const int* d_p0_pair_index,
+    const int* d_p1_pair_index,
+    const int* d_p0_bucket_by_hand_index,
+    const int* d_p1_bucket_by_hand_index,
 
-        const float* d_node_pair_value_p0,
+    const float* d_node_pair_value_p0,
+    const float* d_node_pair_reach_p0,
+    const float* d_node_pair_reach_p1,
+    const float* d_node_pair_reach_chance,
 
-        const float* d_node_pair_reach_p0,
-        const float* d_node_pair_reach_p1,
-        const float* d_node_pair_reach_chance,
-        const float* d_state_bucket_cf_reach,
+    int pair_start,
+    int active_pair_count,
+    int pair_chunk_size,
 
-        float* d_action_value_p0,
+    float* d_action_value_p0,
+    float* d_state_bucket_value_p0,
 
-        cudaStream_t stream = nullptr
-    );
+    cudaStream_t stream = nullptr
+);
 
 // -----------------------------------------------------------------------------
 // Regret update
@@ -364,25 +373,41 @@ void launch_public_backward_pair_value_level(
 //
 //   d_state_bucket_value_p0[state_bucket_index] = state_value_p0
 
-void launch_public_update_regrets(
+void launch_public_accumulate_regret_deltas_for_chunk(
     const KernelLaunchConfig& config,
+
+    const DevicePublicActionEdges& action_edges,
 
     const int* d_action_state_player,
     const int* d_action_state_bucket_count,
     const int* d_action_state_action_count,
     const std::uint64_t* d_action_state_tensor_offset,
-    const std::uint64_t* d_action_state_bucket_offset,
 
-    const float* d_action_value_p0,
-    float* d_state_bucket_value_p0,
-    const float* d_state_bucket_cf_reach,
+    const int* d_p0_pair_index,
+    const int* d_p1_pair_index,
+    const int* d_p0_bucket_by_hand_index,
+    const int* d_p1_bucket_by_hand_index,
 
-    const float* d_sigma,
+    const float* d_node_pair_value_p0,
+    const float* d_node_pair_reach_p0,
+    const float* d_node_pair_reach_p1,
+    const float* d_node_pair_reach_chance,
+
+    int pair_start,
+    int active_pair_count,
+    int pair_chunk_size,
+
+    float* d_regret_delta,
+
+    cudaStream_t stream = nullptr
+);
+
+void launch_apply_regret_deltas(
+    const KernelLaunchConfig& config,
     float* d_regret_sum,
-
-    int num_action_states,
+    const float* d_regret_delta,
+    std::size_t tensor_entries,
     bool use_cfr_plus,
-
     cudaStream_t stream = nullptr
 );
 
