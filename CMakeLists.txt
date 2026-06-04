@@ -12,7 +12,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
-set(CMAKE_CUDA_ARCHITECTURES native CACHE STRING "CUDA architectures" FORCE)
+set(CMAKE_CUDA_ARCHITECTURES 61 75 80 86 89)
 
 # 3. Find dependencies
 find_package(CUDAToolkit REQUIRED)
@@ -50,8 +50,13 @@ target_link_libraries(gui_library
 )
 
 
-add_executable(under_the_gun_gui
+add_executable(under_the_gun_gui WIN32
         src/gui/gui.cpp
+)
+
+set_target_properties(under_the_gun_gui
+        PROPERTIES
+        OUTPUT_NAME "UnderTheGun"
 )
 
 target_include_directories(under_the_gun_gui
@@ -144,6 +149,14 @@ add_library(kuhn_gpu_cfr_lib
         cuda/kernels.cu
         cuda/kernels.hpp
         src/game.cpp
+        src/evaluator_table.cpp
+)
+
+add_library(cuda_evaluator7 STATIC IMPORTED)
+
+set_target_properties(cuda_evaluator7 PROPERTIES
+        IMPORTED_LOCATION
+        "../external/CUDA-Poker-Calculator/lib-cuda/evaluator7.lib"
 )
 
 target_include_directories(kuhn_gpu_cfr_lib
@@ -161,6 +174,7 @@ target_link_libraries(kuhn_gpu_cfr_lib
         PRIVATE
         pheval
         CUDA::cudart
+        cuda_evaluator7
 )
 
 target_compile_definitions(kuhn_gpu_cfr_lib
@@ -170,24 +184,24 @@ target_compile_definitions(kuhn_gpu_cfr_lib
 
 set_target_properties(kuhn_gpu_cfr_lib
         PROPERTIES
-        CUDA_SEPARABLE_COMPILATION OFF
-        CUDA_RESOLVE_DEVICE_SYMBOLS OFF
+        CUDA_SEPARABLE_COMPILATION ON
+        CUDA_RESOLVE_DEVICE_SYMBOLS ON
 )
 
 # ------------------------------------------------------------------------------
 # Main executable
 # ------------------------------------------------------------------------------
 
-add_executable(UnderTheGun
+add_executable(UnderTheGunBenchmark
         src/main.cpp
 )
 
-target_link_libraries(UnderTheGun
+target_link_libraries(UnderTheGunBenchmark
         PRIVATE
         kuhn_gpu_cfr_lib
 )
 
-set_target_properties(UnderTheGun
+set_target_properties(UnderTheGunBenchmark
         PROPERTIES
         LINKER_LANGUAGE CUDA
         CUDA_SEPARABLE_COMPILATION ON
@@ -211,7 +225,17 @@ add_test(
         NAME test_solver_validity
         COMMAND test_solver_validity
 )
-
+add_executable(test_gpu_strategy
+        tests/test_gpu_strategy.cpp
+)
+target_link_libraries(test_gpu_strategy
+        PRIVATE
+        kuhn_gpu_cfr_lib
+)
+add_test(
+        NAME test_gpu_strategy
+        COMMAND test_gpu_strategy
+)
 
 add_executable(test_betting_engine
         tests/test_betting_engine.cpp
@@ -293,3 +317,46 @@ add_test(
         NAME test_flop_subgame_tree
         COMMAND test_flop_subgame_tree
 )
+
+include(GNUInstallDirs)
+
+install(
+        TARGETS under_the_gun_gui
+        RUNTIME DESTINATION .
+)
+
+install(
+        FILES
+        $<TARGET_RUNTIME_DLLS:under_the_gun_gui>
+        DESTINATION .
+)
+
+install(
+        CODE [[
+        file(GET_RUNTIME_DEPENDENCIES
+            EXECUTABLES "$<TARGET_FILE:under_the_gun_gui>"
+            RESOLVED_DEPENDENCIES_VAR resolved_deps
+            UNRESOLVED_DEPENDENCIES_VAR unresolved_deps
+        )
+
+        foreach(dep IN LISTS resolved_deps)
+            file(INSTALL
+                DESTINATION "${CMAKE_INSTALL_PREFIX}"
+                TYPE FILE
+                FILES "${dep}"
+            )
+        endforeach()
+
+        if(unresolved_deps)
+            message(WARNING "Unresolved runtime dependencies: ${unresolved_deps}")
+        endif()
+    ]]
+)
+
+set(CPACK_PACKAGE_NAME "UnderTheGun")
+set(CPACK_PACKAGE_VENDOR "UnderTheGun")
+set(CPACK_PACKAGE_VERSION "1.0.0")
+set(CPACK_GENERATOR "ZIP")
+set(CPACK_PACKAGE_FILE_NAME "UnderTheGun-${CPACK_PACKAGE_VERSION}-windows-x64")
+
+include(CPack)

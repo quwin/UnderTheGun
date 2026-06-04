@@ -1,3 +1,6 @@
 [submodule "external/PokerHandEvaluator"]
 	path = external/PokerHandEvaluator
 	url = https://github.com/HenryRLee/PokerHandEvaluator
+[submodule "external/CUDA-Poker-Calculator"]
+	path = external/CUDA-Poker-Calculator
+	url = https://github.com/tryabin/Poker-Calculator.git
