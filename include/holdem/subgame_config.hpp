@@ -213,13 +213,13 @@ struct HoldemSubgameConfig {
         constexpr std::size_t minimum_game_capacity = 3400;
         constexpr std::size_t hand_size = 100;
         if (board.is_river()) {
-            return minimum_game_capacity + (hand_size * p0_range.nonzero_count() * p1_range.nonzero_count());
+            return minimum_game_capacity + (hand_size * p0_range.nonzero_count());
         }
         if (board.is_turn()) {
-            return (minimum_game_capacity + (hand_size * p0_range.nonzero_count() * p1_range.nonzero_count())) * 430;
+            return (minimum_game_capacity + (hand_size * p0_range.nonzero_count())) * 430;
         }
         if (board.is_flop()) {
-            return (minimum_game_capacity + (hand_size * p0_range.nonzero_count() * p1_range.nonzero_count())) * 430 * 300;
+            return (minimum_game_capacity + (hand_size * p0_range.nonzero_count())) * 430 * 300;
         }
         return 0;
     }

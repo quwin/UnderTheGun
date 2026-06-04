@@ -38,6 +38,7 @@ struct GpuCfrConfig {
     bool synchronize_each_iteration = false;
     // Terminal evaluation mode.
     GpuTerminalMode terminal_mode = GpuTerminalMode::HostPrecomputed;
+    std::string evaluator_data_dir = "../external/CUDA-Poker-Calculator/src/resources";
 };
 
 struct GpuCfrStats {
@@ -152,13 +153,10 @@ struct FlatHandData {
     int p1_hand_count = 0;
     int hand_pair_count = 0;
 
-    // Exact hand ids, domain-local.
-    std::vector<HandId> p0_hands;
-    std::vector<HandId> p1_hands;
-
-    // Optional masks for faster overlap / terminal evaluation kernels.
-    std::vector<std::uint64_t> p0_hand_mask;
-    std::vector<std::uint64_t> p1_hand_mask;
+    std::vector<unsigned char> p0_hand_card0;
+    std::vector<unsigned char> p0_hand_card1;
+    std::vector<unsigned char> p1_hand_card0;
+    std::vector<unsigned char> p1_hand_card1;
 
     // HandPairTable, flat pair arrays.
     //
@@ -186,19 +184,14 @@ struct FlatHandData {
 // -----------------------------------------------------------------------------
 
 struct FlatTerminalData {
-    // terminal_nodes[t] gives the public node id for terminal index t.
     std::vector<int> terminal_nodes;
-
-    // terminal_index_by_node[node_id] gives terminal index, or -1.
     std::vector<int> terminal_index_by_node;
-
-    // HostPrecomputed mode:
-    //
-    //   terminal_value_p0[
-    //       terminal_index * hand_pair_count + hand_pair_id
-    //   ]
-    //
-    // Value is from P0 perspective.
+    // DeviceComputed mode:
+    std::vector<int> terminal_type;
+    std::vector<unsigned char> terminal_board_cards; // terminal_count * 5
+    std::vector<int> pot;
+    std::vector<int> p0_committed;
+    // HostPrecomputed mode only:
     std::vector<float> terminal_value_p0;
 
     [[nodiscard]] int terminal_count() const {
@@ -211,26 +204,18 @@ struct FlatTerminalData {
 // -----------------------------------------------------------------------------
 
 FlatPublicGame flatten_public_game_for_gpu(
-    const Game& game
+    const Game& game,
+    FlatTerminalData& flat_terminal_data
 );
 
 FlatHandData flatten_hand_data_for_gpu(
     const Game& game
 );
 
-// This version only builds terminal metadata, not values.
-FlatTerminalData flatten_terminal_metadata_for_gpu(
-    const Game& game
-);
-
-// This version accepts precomputed terminal values from caller.
-//
-// expected size:
-//
-//   terminal_nodes.size() * game.hand_pairs.pair_count()
-FlatTerminalData flatten_terminal_data_for_gpu(
+void flatten_terminal_data_for_gpu(
     const Game& game,
-    const std::vector<float>& terminal_value_p0
+    FlatTerminalData& flat,
+    GpuTerminalMode terminal_mode
 );
 
 // -----------------------------------------------------------------------------
@@ -322,11 +307,10 @@ struct DeviceHandData {
     int p1_hand_count = 0;
     int hand_pair_count = 0;
 
-    HandId* d_p0_hands = nullptr;
-    HandId* d_p1_hands = nullptr;
-
-    std::uint64_t* d_p0_hand_mask = nullptr;
-    std::uint64_t* d_p1_hand_mask = nullptr;
+    unsigned char* d_p0_hand_card0 = nullptr;
+    unsigned char* d_p0_hand_card1 = nullptr;
+    unsigned char* d_p1_hand_card0 = nullptr;
+    unsigned char* d_p1_hand_card1 = nullptr;
 
     int* d_p0_pair_index = nullptr;
     int* d_p1_pair_index = nullptr;
@@ -347,16 +331,15 @@ struct DeviceTerminalData {
     int hand_pair_count = 0;
 
     int* d_terminal_nodes = nullptr;
-
-    // Length = num_nodes.
-    // -1 for nonterminal nodes.
     int* d_terminal_index_by_node = nullptr;
 
+    // DeviceComputed mode:
+    int* d_terminal_type = nullptr;
+    unsigned char* d_terminal_board_cards = nullptr;
+    int* d_pot = nullptr;
+    int* d_p0_committed = nullptr;
+
     // HostPrecomputed mode:
-    //
-    //   d_terminal_value_p0[
-    //       terminal_index * hand_pair_count + hand_pair_id
-    //   ]
     float* d_terminal_value_p0 = nullptr;
 };
 
@@ -400,7 +383,7 @@ struct DevicePublicWorkBuffers {
     // This can be large, but is the clearest validation layout. Later you can
     // replace it with per-depth rolling buffers.
 
-    float* d_node_pair_value_p0 = nullptr; // TODO: Once correctness is stable, replace with per-depth rolling pair buffers or bucket-aggregated value buffers
+    float* d_node_pair_value_p0 = nullptr;
     float* d_node_pair_value_p0_next = nullptr;
 
     std::size_t node_pair_value_entries = 0;
@@ -460,7 +443,23 @@ struct DevicePublicWorkBuffers {
 // -----------------------------------------------------------------------------
 // Host/device ownership bundle
 // -----------------------------------------------------------------------------
+struct DeviceHandEvaluatorTables {
+    short* d_binaries_by_id = nullptr;
+    short* d_suitbit_by_id = nullptr;
+    short* d_flush = nullptr;
+    short* d_noflush7 = nullptr;
+    unsigned char* d_suits = nullptr;
+    int* d_dp = nullptr;
+};
 
+struct HostHandEvaluatorTables {
+    std::vector<short> binaries_by_id;
+    std::vector<short> suitbit_by_id;
+    std::vector<short> flush;
+    std::vector<short> noflush7;
+    std::vector<unsigned char> suits;
+    std::vector<int> dp;
+};
 struct GpuPublicState {
     FlatPublicGame flat;
     FlatHandData hands;
@@ -472,6 +471,9 @@ struct GpuPublicState {
 
     DevicePublicCfrState cfr;
     DevicePublicWorkBuffers work;
+
+    HostHandEvaluatorTables host_eval_tables;
+    DeviceHandEvaluatorTables eval_tables;
 };
 
 // -----------------------------------------------------------------------------
@@ -480,6 +482,8 @@ struct GpuPublicState {
 
 class GpuCfrSolver {
 public:
+    void upload_hand_evaluator_tables();
+
     // Uses HostPrecomputed terminal mode only if terminal values are later
     // supplied through set_terminal_values().
     explicit GpuCfrSolver(const Game& game);

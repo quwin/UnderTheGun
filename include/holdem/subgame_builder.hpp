@@ -26,11 +26,11 @@ namespace poker::holdem {
             const HandDomain& p1
         );
 
-        void finalize_terminal_node(
+        static void finalize_terminal_node(
             Game& game,
             int node_id,
             const PublicState& state
-        ) const;
+        ) ;
 
         [[nodiscard]] float terminal_value_for_pair(
             const Game& game,

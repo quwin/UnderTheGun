@@ -60,6 +60,14 @@ inline bool operator!=(const GameAction& a, const GameAction& b) {
 inline std::string to_string(const GameAction& action) {
     return "type=" + std::to_string(action.action_type) + ":amount=" + std::to_string(action.amount);
 }
+
+struct TerminalRecord {
+    TerminalType type;
+    BoardIndex board_index;
+    int pot;
+    int p0_committed;
+};
+
 // -----------------------------------------------------------------------------
 // Connection between two Nodes:
 // -----------------------------------------------------------------------------
@@ -261,10 +269,10 @@ public:
     HandDomain p1_hands;
     HandPairTable hand_pairs;
 
-    std::vector<int> terminal_nodes;
-    // terminal_index_by_node[node_id] = terminal index, or -1 for nonterminal.
-    std::vector<int> terminal_index_by_node;
+    std::vector<TerminalRecord> terminal_records;
     std::vector<float> terminal_value_p0;
+
+    Board starting_board;
 
     Game() = default;
     void print_game_memory_usage() const;

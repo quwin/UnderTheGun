@@ -29,9 +29,10 @@
 //   Terminal = 2
 
 #include "kernels.hpp"
+#include "../external/CUDA-Poker-Calculator/src/cuda/evaluator7.cu"
+#include "../external/CUDA-Poker-Calculator/src/cuda/hash.cu"
 
 #include <cuda_runtime_api.h>
-
 #include <cstddef>
 #include <cstdint>
 
@@ -44,6 +45,22 @@ constexpr int kPlayerP1 = 1;
 constexpr int kNodeAction = 0;
 constexpr int kNodeChance = 1;
 
+extern "C" __device__ int evaluate_7cards(
+    int a,
+    int b,
+    int c,
+    int d,
+    int e,
+    int f,
+    int g,
+    short* binaries_by_id,
+    short* suitbit_by_id,
+    short* flush,
+    short* noflush7,
+    unsigned char* suits,
+    int* dp
+);
+
 __device__ __forceinline__ std::uint64_t tensor_index_device(
     const std::uint64_t* offset,
     const int* action_count,
@@ -55,14 +72,6 @@ __device__ __forceinline__ std::uint64_t tensor_index_device(
            static_cast<std::uint64_t>(bucket) *
                static_cast<std::uint64_t>(action_count[state]) +
            static_cast<std::uint64_t>(local_action);
-}
-
-__device__ __forceinline__ std::uint64_t state_bucket_index_device(
-    const std::uint64_t* offset,
-    int state,
-    int bucket
-) {
-    return offset[state] + static_cast<std::uint64_t>(bucket);
 }
 
 __device__ __forceinline__ int pair_bucket_for_player(
@@ -507,7 +516,125 @@ __global__ void public_regret_matching_kernel(
         }
     }
 }
+__device__ float terminal_win_utility(
+int pot,
+int p0_committed
+) {
+    return static_cast<float>(pot - p0_committed);
+}
 
+__device__ float terminal_loss_utility(
+    int p0_committed
+) {
+    return -static_cast<float>(p0_committed);
+}
+
+__device__ float terminal_tie_utility(
+    int pot,
+    int p0_committed
+) {
+    return 0.5f * static_cast<float>(pot) -
+           static_cast<float>(p0_committed);
+}
+
+__global__ void compute_terminal_pair_values_from_records_kernel(
+    int terminal_count,
+    int hand_pair_count,
+
+    const int* __restrict__ terminal_nodes,
+    const int* __restrict__ terminal_type,
+    const int* __restrict__ pot,
+    const int* __restrict__ p0_committed,
+    const unsigned char* __restrict__ terminal_board_cards,
+
+    const int* __restrict__ p0_pair_index,
+    const int* __restrict__ p1_pair_index,
+
+    const unsigned char* __restrict__ p0_hand_card0,
+    const unsigned char* __restrict__ p0_hand_card1,
+    const unsigned char* __restrict__ p1_hand_card0,
+    const unsigned char* __restrict__ p1_hand_card1,
+
+    short* binaries_by_id,
+    short* suitbit_by_id,
+    short* flush,
+    short* noflush7,
+    unsigned char* suits,
+    int* dp,
+
+    float* __restrict__ node_pair_value_p0
+) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int total = terminal_count * hand_pair_count;
+    if (idx >= total) {
+        return;
+    }
+    const int terminal_index = idx / hand_pair_count;
+    const int pair_id = idx - terminal_index * hand_pair_count;
+    const int node_id = terminal_nodes[terminal_index];
+    const int type = terminal_type[terminal_index];
+    const int terminal_pot = pot[terminal_index];
+    const int terminal_p0_committed = p0_committed[terminal_index];
+
+    float value = 0.0f;
+
+    if (type == static_cast<int>(TerminalType::P0_Fold)) {
+        value = terminal_loss_utility(terminal_p0_committed);
+    } else if (type == static_cast<int>(TerminalType::P1_Fold)) {
+        value = terminal_win_utility(terminal_pot, terminal_p0_committed);
+    } else if (type == static_cast<int>(TerminalType::Showdown)) {
+        const int p0_i = p0_pair_index[pair_id];
+        const int p1_i = p1_pair_index[pair_id];
+        const int t = idx / hand_pair_count;
+
+        int p0a = p0_hand_card0[p0_i];
+        int p0b = p0_hand_card1[p0_i];
+        int p1a = p1_hand_card0[p1_i];
+        int p1b = p1_hand_card1[p1_i];
+        int b0 = terminal_board_cards[t * 5 + 0];
+        int b1 = terminal_board_cards[t * 5 + 1];
+        int b2 = terminal_board_cards[t * 5 + 2];
+        int b3 = terminal_board_cards[t * 5 + 3];
+        int b4 = terminal_board_cards[t * 5 + 4];
+
+        const int p0_rank = evaluate_7cards(
+            p0a, p0b, b0, b1, b2, b3, b4,
+            binaries_by_id,
+            suitbit_by_id,
+            flush,
+            noflush7,
+            suits,
+            dp
+        );
+
+        const int p1_rank = evaluate_7cards(
+            p1a, p1b, b0, b1, b2, b3, b4,
+            binaries_by_id,
+            suitbit_by_id,
+            flush,
+            noflush7,
+            suits,
+            dp
+        );
+        // Smaller rank is stronger.
+        if (p0_rank < p1_rank) {
+            value = terminal_win_utility(terminal_pot, terminal_p0_committed);
+        } else if (p1_rank < p0_rank) {
+            value = terminal_loss_utility(terminal_p0_committed);
+        } else {
+            value = terminal_tie_utility(terminal_pot, terminal_p0_committed);
+        }
+    } else if (type == static_cast<int>(TerminalType::AllIn)) {
+        // TODO:
+        value = 0;
+    }
+
+    node_pair_value_p0[
+        static_cast<std::size_t>(node_id) *
+        static_cast<std::size_t>(hand_pair_count) +
+        static_cast<std::size_t>(pair_id)
+    ] = value;
+}
 } // namespace
 
 // -----------------------------------------------------------------------------
@@ -678,6 +805,75 @@ void launch_load_precomputed_terminal_pair_values(
     );
 }
 
+    void launch_compute_terminal_pair_values_from_records(
+        const KernelLaunchConfig& config,
+        int terminal_count,
+        int hand_pair_count,
+
+        const int* d_terminal_nodes,
+        const int* d_terminal_type,
+        const int* d_terminal_pot,
+        const int* d_terminal_p0_committed,
+        const unsigned char* d_terminal_board_cards,
+
+        const int* d_p0_pair_index,
+        const int* d_p1_pair_index,
+
+        const unsigned char* d_p0_hand_card0,
+        const unsigned char* d_p0_hand_card1,
+        const unsigned char* d_p1_hand_card0,
+        const unsigned char* d_p1_hand_card1,
+
+        short* d_binaries_by_id,
+        short* d_suitbit_by_id,
+        short* d_flush,
+        short* d_noflush7,
+        unsigned char* d_suits,
+        int* d_dp,
+
+        float* d_node_pair_value_p0,
+
+        cudaStream_t stream
+    ) {
+    const int total = terminal_count * hand_pair_count;
+
+    if (total <= 0) {
+        return;
+    }
+
+    compute_terminal_pair_values_from_records_kernel<<<
+        blocks_for(total, config.threads_per_block),
+        config.threads_per_block,
+        0,
+        stream
+    >>>(
+        terminal_count,
+        hand_pair_count,
+
+        d_terminal_nodes,
+        d_terminal_type,
+        d_terminal_pot,
+        d_terminal_p0_committed,
+        d_terminal_board_cards,
+
+        d_p0_pair_index,
+        d_p1_pair_index,
+
+        d_p0_hand_card0,
+        d_p0_hand_card1,
+        d_p1_hand_card0,
+        d_p1_hand_card1,
+
+        d_binaries_by_id,
+        d_suitbit_by_id,
+        d_flush,
+        d_noflush7,
+        d_suits,
+        d_dp,
+
+        d_node_pair_value_p0
+    );
+}
 // -----------------------------------------------------------------------------
 // Backward value pass
 // -----------------------------------------------------------------------------

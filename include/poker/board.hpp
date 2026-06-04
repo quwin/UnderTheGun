@@ -2,13 +2,13 @@
 
 #include "deck_mask.hpp"
 #include <algorithm>
-#include <array>
-#include <cstddef>
 #include <cstdint>
 #include <initializer_list>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "hand.hpp"
 #include "../../external/PokerHandEvaluator/cpp/include/phevaluator/card.h"
 
 namespace poker {
@@ -75,14 +75,14 @@ struct Board {
     [[nodiscard]] bool contains(phevaluator::Card card) const {
         return std::find(cards.begin(), cards.end(), card) != cards.end();
     }
-    DeckMask mask() const {
+    [[nodiscard]] DeckMask mask() const {
         DeckMask result = empty_deck_mask();
         for (phevaluator::Card card : cards) {
             result = add_card(result, card);
         }
         return result;
     }
-    Board with_added_card(phevaluator::Card card) const {
+    [[nodiscard]] Board with_added_card(const phevaluator::Card card) const {
         if (cards.size() >= 5) {
             throw std::invalid_argument("Cannot add card to a complete river board.");
         }
@@ -162,5 +162,44 @@ inline std::string to_string(const Board& board) {
 
     return result;
 }
+// Uses HandId to map Flop/Turn/River:
+// Flop: 0
+// Turn: 1-53
+// River: 53-kNumHands
+using BoardIndex = std::uint16_t;
 
+inline BoardIndex make_board_index(
+    const Board& start_board,
+    const Board& board
+) {
+    if (board.size() == start_board.size()) {
+        return 0;
+    }
+
+    if (board.size() == start_board.size() + 1) {
+        return static_cast<BoardIndex>(board.cards.back() + 1);
+    }
+
+    if (board.size() == start_board.size() + 2) {
+        return static_cast<BoardIndex>(
+            53 + make_hand(
+                board.cards[start_board.size()],
+                board.cards[start_board.size() + 1]
+            )
+        );
+    }
+
+    throw std::invalid_argument("Unsupported board extension for BoardIndex.");
+}
+
+inline Board make_board(const Board& start_board, const BoardIndex board_index) {
+    if (board_index == 0) {
+        return start_board;
+    }
+    if (board_index < 53) {
+        return start_board.with_added_card(phevaluator::Card(board_index - 1));
+    }
+    const HoleCards cards = hand_from_id(board_index - 53);
+    return start_board.with_added_card(cards.a).with_added_card(cards.b);
+}
 } // namespace poker

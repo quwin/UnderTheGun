@@ -101,7 +101,7 @@ void launch_initialize_public_uniform_strategy(
 //       node_id * hand_pair_count + pair_id
 //   ]
 //
-// Nonterminal nodes should receive 0.
+// Non-terminal nodes should receive 0.
 
 void launch_load_precomputed_terminal_pair_values(
     const KernelLaunchConfig& config,
@@ -111,6 +111,38 @@ void launch_load_precomputed_terminal_pair_values(
     const int* d_terminal_index_by_node,
     const float* d_terminal_value_p0,
     float* d_node_pair_value_p0,
+    cudaStream_t stream = nullptr
+);
+
+void launch_compute_terminal_pair_values_from_records(
+    const KernelLaunchConfig& config,
+
+    int terminal_count,
+    int hand_pair_count,
+
+    const int* d_terminal_nodes,
+    const int* d_terminal_type,
+    const int* d_terminal_pot,
+    const int* d_terminal_p0_committed,
+    const unsigned char* d_terminal_board_cards,
+
+    const int* d_p0_pair_index,
+    const int* d_p1_pair_index,
+
+    const unsigned char* d_p0_hand_card0,
+    const unsigned char* d_p0_hand_card1,
+    const unsigned char* d_p1_hand_card0,
+    const unsigned char* d_p1_hand_card1,
+
+    short* d_binaries_by_id,
+    short* d_suitbit_by_id,
+    short* d_flush,
+    short* d_noflush7,
+    unsigned char* d_suits,
+    int* d_dp,
+
+    float* d_node_pair_value_p0,
+
     cudaStream_t stream = nullptr
 );
 
