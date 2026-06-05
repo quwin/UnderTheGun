@@ -5,6 +5,7 @@
 #include "public_state.hpp"
 #include "subgame_config.hpp"
 #include "all_in_equity_cache.hpp"
+#include "cfr_gpu.hpp"
 
 namespace poker::holdem {
     class HoldemSubgameBuilder {
@@ -26,11 +27,11 @@ namespace poker::holdem {
             const HandDomain& p1
         );
 
-        static void finalize_terminal_node(
+        void finalize_terminal_node(
             Game& game,
             int node_id,
             const PublicState& state
-        ) ;
+        ) const ;
 
         [[nodiscard]] float terminal_value_for_pair(
             const Game& game,

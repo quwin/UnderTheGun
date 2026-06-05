@@ -6,8 +6,8 @@
 #include "poker/deck_mask.hpp"
 #include "poker/hand.hpp"
 #include "poker/range.hpp"
-#include "../../external/PokerHandEvaluator/cpp/include/phevaluator/phevaluator.h"
-#include "../../external/PokerHandEvaluator/cpp/include/phevaluator/rank.h"
+#include <phevaluator/phevaluator.h>
+#include <phevaluator/rank.h>
 
 #include <array>
 #include <cstdint>

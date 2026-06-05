@@ -35,6 +35,8 @@
 #include <utility>
 #include <vector>
 
+#include "cfr_gpu.hpp"
+
 namespace poker::holdem {
 namespace {
 GameAction to_game_action(const Action& action) {
@@ -119,8 +121,10 @@ Game HoldemSubgameBuilder::build() const {
     const PublicState root_state = config_.initial_public_state();
     game.starting_board = root_state.board;
     initialize_hand_data(game, root_state.board);
-    all_in_equity_cache_ = std::make_unique<AllInEquityCache>();
-    all_in_equity_cache_->initialize_for_subgame(root_state.board, config_.p0_range, config_.p1_range);
+    if (config_.terminal_mode == TerminalMode::ValuePrecomputed) {
+        all_in_equity_cache_ = std::make_unique<AllInEquityCache>();
+        all_in_equity_cache_->initialize_for_subgame(root_state.board, config_.p0_range, config_.p1_range);
+    }
     const PublicNode root_node = make_node_from_public_state(
         root_state,
         PublicNodeType::Action,
@@ -256,17 +260,52 @@ void HoldemSubgameBuilder::finalize_terminal_node(
     Game& game,
     const int node_id,
     const PublicState& state
-) {
+) const {
     PublicNode& node = game.node(node_id);
     node.type = PublicNodeType::Terminal;
     node.player = Player::Terminal;
+    if (config_.terminal_mode == TerminalMode::RecordComputed) {
+        auto record = TerminalRecord();
+        record.type = state.terminal_type;
+        record.pot = state.pot;
+        record.p0_committed = state.betting.p0_committed_this_round;
+        record.board_index = make_board_index(game.starting_board, state.board);
+        game.terminal_records.emplace_back(record);
+    } else if (config_.terminal_mode == TerminalMode::ValuePrecomputed) {
+        const std::size_t old_size = game.terminal_value_p0.size();
+        const int hand_pair_count = game.hand_pairs.pair_count();
+        game.terminal_value_p0.resize(old_size + static_cast<std::size_t>(hand_pair_count),0.0f);
+        for (int pair_id = 0; pair_id < hand_pair_count; ++pair_id) {
+            const float value = terminal_value_for_pair(game,state,pair_id);
+            if (!std::isfinite(value)) {
+                throw std::runtime_error(
+                    "Computed non-finite terminal value."
+                );
+            }
+            game.terminal_value_p0[old_size + pair_id] = value;
+        }
+    } else if (config_.terminal_mode == TerminalMode::DebugComputed) {
+        // Do both
+        auto record = TerminalRecord();
+        record.type = state.terminal_type;
+        record.pot = state.pot;
+        record.p0_committed = state.betting.p0_committed_this_round;
+        record.board_index = make_board_index(game.starting_board, state.board);
+        game.terminal_records.emplace_back(record);
 
-    auto record = TerminalRecord();
-    record.type = state.terminal_type;
-    record.pot = state.pot;
-    record.p0_committed = state.betting.p0_committed_this_round;
-    record.board_index = make_board_index(game.starting_board, state.board);
-    game.terminal_records.emplace_back(record);
+        const std::size_t old_size = game.terminal_value_p0.size();
+        const int hand_pair_count = game.hand_pairs.pair_count();
+        game.terminal_value_p0.resize(old_size + static_cast<std::size_t>(hand_pair_count),0.0f);
+        for (int pair_id = 0; pair_id < hand_pair_count; ++pair_id) {
+            const float value = terminal_value_for_pair(game,state,pair_id);
+            if (!std::isfinite(value)) {
+                throw std::runtime_error(
+                    "Computed non-finite terminal value."
+                );
+            }
+            game.terminal_value_p0[old_size + pair_id] = value;
+        }
+    }
 }
 
 float HoldemSubgameBuilder::terminal_value_for_pair(

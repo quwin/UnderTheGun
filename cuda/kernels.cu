@@ -42,7 +42,7 @@ namespace {
 constexpr int kPlayerP0 = 0;
 constexpr int kPlayerP1 = 1;
 
-extern "C" __device__ int evaluate_7cards(
+extern "C" __device__ int cuda_evaluate_7cards(
     int a,
     int b,
     int c,
@@ -320,7 +320,208 @@ __device__ float terminal_tie_utility(
     return 0.5f * static_cast<float>(pot) -
            static_cast<float>(p0_committed);
 }
+__device__ unsigned long long card_bit_device(int card) {
+    return 1ULL << static_cast<unsigned long long>(card);
+}
 
+__device__ bool card_is_dead_device(
+    unsigned long long dead_mask,
+    int card
+) {
+    return (dead_mask & card_bit_device(card)) != 0ULL;
+}
+__device__ float terminal_showdown_utility(
+    int pot,
+    int p0_committed,
+
+    int p0a,
+    int p0b,
+    int p1a,
+    int p1b,
+
+    int b0,
+    int b1,
+    int b2,
+    int b3,
+    int b4,
+
+    short* d_binaries_by_id,
+    short* d_suitbit_by_id,
+    short* d_flush,
+    short* d_noflush7,
+    unsigned char* d_suits,
+    int* d_dp
+) {
+    const int p0_rank = cuda_evaluate_7cards(
+        p0a,
+        p0b,
+        b0,
+        b1,
+        b2,
+        b3,
+        b4,
+        d_binaries_by_id,
+        d_suitbit_by_id,
+        d_flush,
+        d_noflush7,
+        d_suits,
+        d_dp
+    );
+    const int p1_rank = cuda_evaluate_7cards(
+        p1a,
+        p1b,
+        b0,
+        b1,
+        b2,
+        b3,
+        b4,
+        d_binaries_by_id,
+        d_suitbit_by_id,
+        d_flush,
+        d_noflush7,
+        d_suits,
+        d_dp
+    );
+    // Smaller rank is stronger.
+    if (p0_rank < p1_rank) {
+        return terminal_win_utility(pot, p0_committed);
+    }
+
+    if (p1_rank < p0_rank) {
+        return terminal_loss_utility(p0_committed);
+    }
+
+    return terminal_tie_utility(pot, p0_committed);
+}
+__device__ float terminal_all_in_runout_utility(
+    int pot,
+    int p0_committed,
+
+    int p0a,
+    int p0b,
+    int p1a,
+    int p1b,
+
+    int b0,
+    int b1,
+    int b2,
+    int b3,
+    int b4,
+
+    short* d_binaries_by_id,
+    short* d_suitbit_by_id,
+    short* d_flush,
+    short* d_noflush7,
+    unsigned char* d_suits,
+    int* d_dp
+) {
+    constexpr int kMissingCard = 52;
+    unsigned long long dead_mask = 0ULL;
+    dead_mask |= card_bit_device(p0a);
+    dead_mask |= card_bit_device(p0b);
+    dead_mask |= card_bit_device(p1a);
+    dead_mask |= card_bit_device(p1b);
+    dead_mask |= card_bit_device(b0);
+    dead_mask |= card_bit_device(b1);
+    dead_mask |= card_bit_device(b2);
+    const bool has_turn = b3 != kMissingCard;
+    const bool has_river = b4 != kMissingCard;
+    if (has_turn) {
+        dead_mask |= card_bit_device(b3);
+    }
+    if (has_river) {
+        dead_mask |= card_bit_device(b4);
+    }
+    // River board: direct showdown.
+    if (has_turn && has_river) {
+        return terminal_showdown_utility(
+            pot,
+            p0_committed,
+            p0a,
+            p0b,
+            p1a,
+            p1b,
+            b0,
+            b1,
+            b2,
+            b3,
+            b4,
+            d_binaries_by_id,
+            d_suitbit_by_id,
+            d_flush,
+            d_noflush7,
+            d_suits,
+            d_dp
+        );
+    }
+    float value_sum = 0.0f;
+    int runout_count = 0;
+    // Turn board: enumerate one river card.
+    if (has_turn && !has_river) {
+        for (int river = 0; river < 52; ++river) {
+            if (card_is_dead_device(dead_mask, river)) {
+                continue;
+            }
+            value_sum += terminal_showdown_utility(
+                pot,
+                p0_committed,
+                p0a,
+                p0b,
+                p1a,
+                p1b,
+                b0,
+                b1,
+                b2,
+                b3,
+                river,
+                d_binaries_by_id,
+                d_suitbit_by_id,
+                d_flush,
+                d_noflush7,
+                d_suits,
+                d_dp
+            );
+            ++runout_count;
+        }
+        return runout_count > 0 ? value_sum / static_cast<float>(runout_count) : 0.0f;
+    }
+    // Flop board: enumerate unordered turn-river combinations.
+    if (!has_turn && !has_river) {
+        for (int turn = 0; turn < 52; ++turn) {
+            if (card_is_dead_device(dead_mask, turn)) {
+                continue;
+            }
+            const unsigned long long dead_with_turn = dead_mask | card_bit_device(turn);
+            for (int river = turn + 1; river < 52; ++river) {
+                if (card_is_dead_device(dead_with_turn, river)) {
+                    continue;
+                }
+                value_sum += terminal_showdown_utility(
+                    pot,
+                    p0_committed,
+                    p0a,
+                    p0b,
+                    p1a,
+                    p1b,
+                    b0,
+                    b1,
+                    b2,
+                    turn,
+                    river,
+                    d_binaries_by_id,
+                    d_suitbit_by_id,
+                    d_flush,
+                    d_noflush7,
+                    d_suits,
+                    d_dp
+                );
+                ++runout_count;
+            }
+        }
+        return runout_count > 0 ? value_sum / static_cast<float>(runout_count): 0.0f;
+    }
+    return 0.0f;
+}
 __global__ void compute_terminal_pair_values_from_records_chunk_kernel(
     int terminal_count,
     int pair_start,
@@ -372,29 +573,16 @@ __global__ void compute_terminal_pair_values_from_records_chunk_kernel(
     } else if (type == static_cast<int>(TerminalType::Showdown)) {
         const int p0_i = d_p0_pair_index[global_pair];
         const int p1_i = d_p1_pair_index[global_pair];
-
         const int p0a = d_p0_hand_card0[p0_i];
         const int p0b = d_p0_hand_card1[p0_i];
         const int p1a = d_p1_hand_card0[p1_i];
         const int p1b = d_p1_hand_card1[p1_i];
         const int bo = terminal_index * 5;
-        const int p0_rank = evaluate_7cards(
+        value = terminal_showdown_utility(
+            pot,
+            p0_committed,
             p0a,
             p0b,
-            d_terminal_board_cards[bo + 0],
-            d_terminal_board_cards[bo + 1],
-            d_terminal_board_cards[bo + 2],
-            d_terminal_board_cards[bo + 3],
-            d_terminal_board_cards[bo + 4],
-            d_binaries_by_id,
-            d_suitbit_by_id,
-            d_flush,
-            d_noflush7,
-            d_suits,
-            d_dp
-        );
-
-        const int p1_rank = evaluate_7cards(
             p1a,
             p1b,
             d_terminal_board_cards[bo + 0],
@@ -409,22 +597,36 @@ __global__ void compute_terminal_pair_values_from_records_chunk_kernel(
             d_suits,
             d_dp
         );
-        // Smaller rank is stronger.
-        if (p0_rank < p1_rank) {
-            value = terminal_win_utility(pot, p0_committed);
-        } else if (p1_rank < p0_rank) {
-            value = terminal_loss_utility(p0_committed);
-        } else {
-            value = terminal_tie_utility(pot, p0_committed);
-        }
     } else if (type == static_cast<int>(TerminalType::AllIn)) {
-        // TODO:
-        value = 0;
+        const int p0_i = d_p0_pair_index[global_pair];
+        const int p1_i = d_p1_pair_index[global_pair];
+        const int p0a = d_p0_hand_card0[p0_i];
+        const int p0b = d_p0_hand_card1[p0_i];
+        const int p1a = d_p1_hand_card0[p1_i];
+        const int p1b = d_p1_hand_card1[p1_i];
+        const int bo = terminal_index * 5;
+        value = terminal_all_in_runout_utility(
+            pot,
+            p0_committed,
+            p0a,
+            p0b,
+            p1a,
+            p1b,
+            d_terminal_board_cards[bo + 0],
+            d_terminal_board_cards[bo + 1],
+            d_terminal_board_cards[bo + 2],
+            d_terminal_board_cards[bo + 3],
+            d_terminal_board_cards[bo + 4],
+            d_binaries_by_id,
+            d_suitbit_by_id,
+            d_flush,
+            d_noflush7,
+            d_suits,
+            d_dp
+        );
     }
-
     d_node_pair_value_p0[static_cast<std::size_t>(node_id) * static_cast<std::size_t>(pair_chunk_size) +static_cast<std::size_t>(local_pair)] = value;
 }
-
 } // namespace
 
 // -----------------------------------------------------------------------------

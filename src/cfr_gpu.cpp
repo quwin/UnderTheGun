@@ -314,8 +314,8 @@ FlatHandData flatten_hand_data_for_gpu(
 }
 
 
-void flatten_terminal_data_for_gpu(const Game& game, FlatTerminalData& flat, const GpuTerminalMode terminal_mode) {
-    if (terminal_mode == GpuTerminalMode::HostPrecomputed) {
+void flatten_terminal_data_for_gpu(const Game& game, FlatTerminalData& flat, const TerminalMode terminal_mode) {
+    if (terminal_mode == TerminalMode::ValuePrecomputed) {
         if (game.terminal_value_p0.empty()) {
             throw std::invalid_argument(
                 "No terminal values found for GpuTerminalMode::HostPrecomputed"
@@ -323,7 +323,7 @@ void flatten_terminal_data_for_gpu(const Game& game, FlatTerminalData& flat, con
         }
         flat.terminal_value_p0 = game.terminal_value_p0;
     }
-    if (terminal_mode == GpuTerminalMode::DeviceComputed) {
+    if (terminal_mode == TerminalMode::RecordComputed) {
         if (game.terminal_records.size() != flat.terminal_nodes.size()) {
             throw std::invalid_argument(
                 "No Terminal Records found for GpuTerminalMode::DeviceComputed"
@@ -331,9 +331,9 @@ void flatten_terminal_data_for_gpu(const Game& game, FlatTerminalData& flat, con
         }
         const int terminal_count = flat.terminal_count();
         flat.terminal_type.resize(terminal_count);
-        flat.terminal_board_cards.assign(terminal_count*5, 0);
         flat.pot.resize(terminal_count);
         flat.p0_committed.resize(terminal_count);
+        flat.terminal_board_cards.assign(terminal_count*5, kNumCards); // 0-51 = cards, 52 = no card available
         for (int t = 0; t < terminal_count; ++t) {
             const auto&[type, board_index, pot, p0_committed] = game.terminal_records[static_cast<std::size_t>(t)];
             flat.terminal_type[static_cast<std::size_t>(t)] = static_cast<int>(type);
@@ -518,7 +518,7 @@ void GpuCfrSolver::initialize() {
         upload_hand_data();
         upload_terminal_data();
 
-        if (config_.terminal_mode == GpuTerminalMode::DeviceComputed) {
+        if (config_.terminal_mode == TerminalMode::RecordComputed) {
             gpu_.host_eval_tables = load_hand_evaluator_tables(config_.evaluator_data_dir);
             upload_hand_evaluator_tables();
         }
@@ -530,15 +530,6 @@ void GpuCfrSolver::initialize() {
             << " node_pair_entries=" << node_pair_entries
             << " node_pair_value MiB="
             << (static_cast<double>(node_pair_bytes) / (1024.0 * 1024.0))
-            << std::endl;
-        std::size_t free_bytes = 0;
-        std::size_t total_bytes = 0;
-        cudaMemGetInfo(&free_bytes, &total_bytes);
-        std::cerr
-            << "[gpu memory] free MiB="
-            << static_cast<double>(free_bytes) / (1024.0 * 1024.0)
-            << " total MiB="
-            << static_cast<double>(total_bytes) / (1024.0 * 1024.0)
             << std::endl;
 
         allocate_cfr_state();
@@ -742,13 +733,13 @@ void GpuCfrSolver::upload_terminal_data() {
         &terminals.d_terminal_index_by_node,
         flat.terminal_index_by_node
     );
-    if (config_.terminal_mode == GpuTerminalMode::DeviceComputed) {
+    if (config_.terminal_mode == TerminalMode::RecordComputed) {
         cuda_alloc_copy(&terminals.d_terminal_type, flat.terminal_type);
         cuda_alloc_copy(&terminals.d_terminal_board_cards, flat.terminal_board_cards);
         cuda_alloc_copy(&terminals.d_pot, flat.pot);
         cuda_alloc_copy(&terminals.d_p0_committed, flat.p0_committed);
     }
-    if (config_.terminal_mode == GpuTerminalMode::HostPrecomputed) {
+    if (config_.terminal_mode == TerminalMode::ValuePrecomputed) {
         cuda_alloc_copy(
             &terminals.d_terminal_value_p0,
             flat.terminal_value_p0
@@ -817,6 +808,13 @@ void GpuCfrSolver::allocate_work_buffers() {
             cudaMemGetInfo(&free_bytes, &total_bytes),
             "cudaMemGetInfo failed"
         );
+        cudaMemGetInfo(&free_bytes, &total_bytes);
+        std::cerr
+            << "[gpu memory] free MiB after allocation="
+            << static_cast<double>(free_bytes) / (1024.0 * 1024.0)
+            << " total MiB="
+            << static_cast<double>(total_bytes) / (1024.0 * 1024.0)
+            << std::endl;
         pair_chunk_size = static_cast<int>(
             choose_pair_chunk_size_full_tree(
                 free_bytes,
@@ -828,9 +826,6 @@ void GpuCfrSolver::allocate_work_buffers() {
     }
     pair_chunk_size = std::min(pair_chunk_size,gpu_.hands.hand_pair_count);
 
-    if (pair_chunk_size <= 0) {
-        throw std::runtime_error("Invalid pair_chunk_size.");
-    }
     work.pair_chunk_size = pair_chunk_size;
     work.node_pair_value_entries =
         checked_mul(
@@ -875,7 +870,7 @@ void GpuCfrSolver::allocate_work_buffers() {
            ) / (1024.0 * 1024.0)
         << " total_4_buffers_mib="
         << static_cast<double>(
-               work.node_pair_value_entries * sizeof(float) * 5
+               work.node_pair_value_entries * sizeof(float) * 4
            ) / (1024.0 * 1024.0)
         << "\n";
 }
@@ -966,7 +961,7 @@ void GpuCfrSolver::run_one_iteration() {
     KernelLaunchConfig launch;
     launch.threads_per_block = config_.threads_per_block;
 
-    if (config_.terminal_mode == GpuTerminalMode::DeviceComputed) {
+    if (config_.terminal_mode == TerminalMode::RecordComputed) {
         launch_compute_terminal_pair_values_from_records_chunk(
             launch,
             gpu_.terminal_data.terminal_count,

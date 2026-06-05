@@ -1,6 +1,5 @@
 #include "cfr_cpu.hpp"
 #include "exploitability.hpp"
-
 #include "cfr_gpu.hpp"
 
 #include "holdem/subgame_builder.hpp"
@@ -10,19 +9,20 @@
 #include <iomanip>
 #include <iostream>
 #include <vector>
-#include <cmath>
 
 namespace {
 poker::Board make_test_board() {
     return poker::Board{
         {
             phevaluator::Card("As"),
-            phevaluator::Card("7h"),
-            phevaluator::Card("Jh"),
+            phevaluator::Card("7s"),
+            phevaluator::Card("Js"),
+            phevaluator::Card("4s"),
+            phevaluator::Card("4d"),
         }
     };
 }
-
+    
     poker::Range make_tiny_p0_range() {
     poker::Range range;
     range.clear();
@@ -34,7 +34,6 @@ poker::Board make_test_board() {
         ),
         1.0f
     );
-
     range.set_weight(
         poker::make_hand(
             phevaluator::Card("Ks"),
@@ -46,7 +45,7 @@ poker::Board make_test_board() {
     return range;
 }
 
-    poker::Range make_tiny_p1_range() {
+poker::Range make_tiny_p1_range() {
     poker::Range range;
     range.clear();
 
@@ -57,7 +56,6 @@ poker::Board make_test_board() {
         ),
         1.0f
     );
-
     range.set_weight(
         poker::make_hand(
             phevaluator::Card("Th"),
@@ -68,6 +66,63 @@ poker::Board make_test_board() {
 
     return range;
 }
+poker::Range small_symmetric_range() {
+    poker::Range range;
+    range.clear();
+
+    const std::vector<std::string> small_range = {
+        "AA", "KK", "QQ", "JJ", "TT",
+        "AKs", "AQs", "AJs", "KQs", "QJs",
+        "AKo", "AQo", "KQo"
+    };
+
+    for (const std::string& token : small_range) {
+        const char r1 = token[0];
+        const char r2 = token[1];
+
+        const bool pair = (r1 == r2);
+        const char suffix =
+            token.size() == 3
+                ? static_cast<char>(std::tolower(static_cast<unsigned char>(token[2])))
+                : '\0';
+        const std::vector<phevaluator::Card> c1 = {
+            phevaluator::Card(std::string{r1, 'c'}),
+            phevaluator::Card(std::string{r1, 'd'}),
+            phevaluator::Card(std::string{r1, 'h'}),
+            phevaluator::Card(std::string{r1, 's'})
+        };
+        const std::vector<phevaluator::Card> c2 = {
+            phevaluator::Card(std::string{r2, 'c'}),
+            phevaluator::Card(std::string{r2, 'd'}),
+            phevaluator::Card(std::string{r2, 'h'}),
+            phevaluator::Card(std::string{r2, 's'})
+        };
+        for (phevaluator::Card a : c1) {
+            for (phevaluator::Card b : c2) {
+                if (a == b) {
+                    continue;
+                }
+                const bool suited = a.describeSuit() == b.describeSuit();
+                if (pair) {
+                    if (static_cast<int>(a) >= static_cast<int>(b)) {
+                        continue;
+                    }
+                } else {
+                    if (suffix == 's' && !suited) {
+                        continue;
+                    }
+                    if (suffix == 'o' && suited) {
+                        continue;
+                    }
+                }
+                range.set_weight(poker::make_hand(a, b), 1.0f);
+            }
+        }
+    }
+
+    return range;
+}
+
 
 poker::holdem::HoldemSubgameConfig make_test_config() {
     poker::holdem::HoldemSubgameConfig config;
@@ -77,10 +132,13 @@ poker::holdem::HoldemSubgameConfig make_test_config() {
     config.effective_stack = 2000;
     config.player_to_act = poker::Player::P0;
     config.collapse_all_in_runouts_to_ev = true;
-    config.p0_range = make_tiny_p0_range();
-    config.p1_range = make_tiny_p1_range();
+    config.p0_range = small_symmetric_range();
+    config.p1_range = small_symmetric_range();
+    // config.p0_range = make_tiny_p0_range();
+    // config.p1_range = make_tiny_p1_range();
     config.betting_abstraction = poker::holdem::make_standard_abstraction();
-
+    config.board_abstraction = poker::holdem::make_isomorphic_board_abstraction(config.p0_range,config.p1_range);
+    config.terminal_mode = poker::TerminalMode::DebugComputed;
     return config;
 }
 
@@ -114,7 +172,7 @@ BenchResult run_cpu_benchmark(
     const poker::Game& game,
     int iterations
 ) {
-    const poker::CfrConfig config;
+    constexpr poker::CfrConfig config;
     const poker::TerminalValueProvider terminal_values;
     poker::CpuCfrSolver solver(game,terminal_values, config);
 
@@ -136,6 +194,9 @@ BenchResult run_gpu_benchmark(
 ) {
     poker::GpuCfrConfig config;
     config.synchronize_each_iteration = false; // true only while debugging
+    config.threads_per_block = 512;
+    config.terminal_mode = poker::TerminalMode::RecordComputed;
+    // config.pair_chunk_size = 256;
     poker::GpuCfrSolver solver(game, config);
     const auto t0 = Clock::now();
     solver.run_iterations(iterations);
@@ -155,7 +216,7 @@ BenchResult run_gpu_benchmark(
 void print_result(const BenchResult& r) {
     std::cout
         << std::left << std::setw(8) << r.name
-        << " time=" << std::setw(10) << r.seconds << "s"
+        << " time=" << std::setw(6) << r.seconds << "s"
         << " iter/s=" << std::setw(12) << r.iters_per_sec
         << "\n";
 }
@@ -165,9 +226,10 @@ void print_result(const BenchResult& r) {
 int main() {
     try {
         constexpr int iterations = 100;
-
         const poker::holdem::HoldemSubgameConfig config = make_test_config();
+        std::cout << "Expected Memory: " << config.memoryEstimate() << " bytes\n";
         const poker::Game game = poker::holdem::HoldemSubgameBuilder(config).build();
+
         game.print_game_memory_usage();
         std::cout << "Benchmarking " << iterations << " CFR iterations\n";
         std::cout << "Nodes: " << game.num_nodes() << "\n";
@@ -175,12 +237,12 @@ int main() {
         const BenchResult gpu = run_gpu_benchmark(game, iterations);
         print_result(gpu);
 
-        // const BenchResult cpu = run_cpu_benchmark(game, iterations);
-        // print_result(cpu);
+        const BenchResult cpu = run_cpu_benchmark(game, iterations);
+        print_result(cpu);
 
 
-        // std::cout << "GPU speed relative to CPU: " << cpu.seconds / gpu.seconds << "x\n";
-        // std::cout << "Max avg-strategy abs diff: " << max_abs_diff(cpu.avg_strategy, gpu.avg_strategy) << std::endl;
+        std::cout << "GPU speed relative to CPU: " << cpu.seconds / gpu.seconds << "x\n";
+        std::cout << "Max avg-strategy abs diff: " << max_abs_diff(cpu.avg_strategy, gpu.avg_strategy) << std::endl;
 
         return 0;
     } catch (const std::exception& e) {

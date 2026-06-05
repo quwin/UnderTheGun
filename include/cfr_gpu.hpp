@@ -11,19 +11,17 @@ namespace poker {
 // GPU CFR configuration / stats
 // -----------------------------------------------------------------------------
 
-enum class GpuTerminalMode : int {
-    // Terminal values are supplied by host code as:
-    //
-    //   terminal_value[terminal_index][hand_pair]
-    //
-    // This is simplest for validation.
-    HostPrecomputed = 0,
-
-    // Terminal values are computed on device from board, terminal type,
+enum class TerminalMode : int {
+    // Terminal values are supplied by the game tree as: terminal_value[terminal_index][hand_pair]
+    // This is simplest for validation, but takes up [terminal_nodes] * sizeOf(float) * [hand_pairs] memory,
+    // quickly scaling out of hands
+    ValuePrecomputed = 0,
+    // Terminal values are computed during CFR from board, terminal type,
     // hand domains, and hand-pair table.
-    //
-    // Use this later for performance.
-    DeviceComputed = 1
+    // Instead, takes [total_nodes] * sizeOf(TerminalRecord) memory
+    RecordComputed = 1,
+    // Debug value to create both terminal_values and TerminalRecords.
+    DebugComputed = 2,
 };
 
 struct GpuCfrConfig {
@@ -37,7 +35,7 @@ struct GpuCfrConfig {
     // Debug only. Synchronizing every iteration is expensive.
     bool synchronize_each_iteration = false;
     // Terminal evaluation mode.
-    GpuTerminalMode terminal_mode = GpuTerminalMode::HostPrecomputed;
+    TerminalMode terminal_mode = TerminalMode::RecordComputed;
     // 0 means auto-select from available VRAM.
     int pair_chunk_size = 0;
     double vram_usage_fraction = 0.85;
@@ -218,7 +216,7 @@ FlatHandData flatten_hand_data_for_gpu(
 void flatten_terminal_data_for_gpu(
     const Game& game,
     FlatTerminalData& flat,
-    GpuTerminalMode terminal_mode
+    TerminalMode terminal_mode
 );
 
 // -----------------------------------------------------------------------------

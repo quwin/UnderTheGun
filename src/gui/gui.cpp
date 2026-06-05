@@ -48,6 +48,7 @@
 #include "cfr_gpu.hpp"
 
 // GUI components
+#include "cfr_cpu.hpp"
 #include "components/Page1_Settings.hh"
 #include "components/Page2_Board.hh"
 #include "components/Page3_HeroRange.hh"
@@ -456,37 +457,31 @@ class Wizard : public Fl_Double_Window {
     config.betting_abstraction = make_gui_betting_abstraction();
     config.collapse_all_in_runouts_to_ev = true;
     config.board_abstraction = poker::holdem::make_isomorphic_board_abstraction(config.p0_range, config.p1_range);
-
-    const std::size_t availableMemory = MemoryUtil::getAvailableMemory();
-    m_pg5->setMemoryEstimate( sizeof(poker::Game) + config.memoryEstimate(), availableMemory);
-    Fl::check();
-
-    if (!m_pg5->isMemoryOk()) {
-      throw std::runtime_error("Not enough memory for this solve. Try reducing range sizes or solving from a later street.");
-    }
-
-    m_pg5->setStatus("Building native Hold'em subgame tree...");
-    Fl::check();
-
-    poker::Game built = poker::holdem::HoldemSubgameBuilder(config).build();
-
-    m_pg5->setStatus("Training native CFR solver...");
-    m_pg5->reset();
-    Fl::check();
-
-    m_game = std::make_unique<poker::Game>(std::move(built));
-
     const int total = std::max<int>(0, m_data.iterations);
     const int chunk = std::max<int>(1, total / 100);
 
     if (std::string(m_pg1->getCFRRenderer()) == "GPU") {
+      const std::size_t availableMemory = MemoryUtil::getAvailableMemory();
+      m_pg5->setMemoryEstimate( sizeof(poker::Game) + (config.memoryEstimate() / config.p0_range.hands_with_positive_weight().size() / config.p1_range.hands_with_positive_weight().size()), availableMemory);
+      Fl::check();
+      if (!m_pg5->isMemoryOk()) {
+        throw std::runtime_error("Not enough memory for this solve. Try reducing range sizes, solving from a later street, or using enabling GPU mode.");
+      }
+      m_pg5->setStatus("Building native Hold'em subgame tree...");
+      Fl::check();
+
+      poker::Game built = poker::holdem::HoldemSubgameBuilder(config).build();
+      m_pg5->setStatus("Training native CFR solver...");
+      m_pg5->reset();
+      Fl::check();
+      m_game = std::make_unique<poker::Game>(std::move(built));
         poker::GpuCfrConfig cfr_config;
         cfr_config.num_players = 2;
         cfr_config.synchronize_each_iteration = false;
         cfr_config.threads_per_block = 256;
         cfr_config.use_cfr_plus = false;
         cfr_config.linear_averaging = false;
-        cfr_config.terminal_mode = poker::GpuTerminalMode::DeviceComputed;
+        cfr_config.terminal_mode = poker::TerminalMode::RecordComputed;
 
         poker::GpuCfrSolver solver(*m_game, cfr_config);
         for (int done = 0; done < total;) {
@@ -502,32 +497,50 @@ class Wizard : public Fl_Double_Window {
 
         m_average_strategy = solver.average_strategy();
     } else {
-    // poker::CfrConfig cfr_config;
-    // cfr_config.num_players = 2;
-    // cfr_config.use_cfr_plus = false;
-    // cfr_config.linear_averaging = false;
-    // cfr_config.simultaneous_updates = true;
-    //
-    // poker::TerminalValueProvider terminal_values;
-    //
-    // poker::CpuCfrSolver solver(
-    //     *m_game,
-    //     terminal_values,
-    //     cfr_config
-    // );
-    //
-    // for (int done = 0; done < total;) {
-    //     const int step = std::min<int>(chunk, total - done);
-    //
-    //     solver.run_iterations(step);
-    //
-    //     done += step;
-    //     m_pg5->setIteration(done, total);
-    //     m_pg5->setProgress(done, total);
-    //     Fl::check();
-    // }
-    //
-    // m_average_strategy = solver.average_strategy();
+      config.terminal_mode = poker::TerminalMode::ValuePrecomputed;
+      const std::size_t availableMemory = MemoryUtil::getAvailableMemory();
+      m_pg5->setMemoryEstimate( sizeof(poker::Game) + config.memoryEstimate(), availableMemory);
+      Fl::check();
+      if (!m_pg5->isMemoryOk()) {
+        throw std::runtime_error("Not enough memory for this solve. Try reducing range sizes, solving from a later street, or using enabling GPU mode.");
+      }
+      m_pg5->setStatus("Building native Hold'em subgame tree...");
+      Fl::check();
+
+      poker::Game built = poker::holdem::HoldemSubgameBuilder(config).build();
+
+      m_pg5->setStatus("Training native CFR solver...");
+      m_pg5->reset();
+      Fl::check();
+
+      m_game = std::make_unique<poker::Game>(std::move(built));
+
+      poker::CfrConfig cfr_config;
+      cfr_config.num_players = 2;
+      cfr_config.use_cfr_plus = false;
+      cfr_config.linear_averaging = false;
+      cfr_config.simultaneous_updates = true;
+
+      poker::TerminalValueProvider terminal_values;
+
+      poker::CpuCfrSolver solver(
+          *m_game,
+          terminal_values,
+          cfr_config
+      );
+
+      for (int done = 0; done < total;) {
+          const int step = std::min<int>(chunk, total - done);
+
+          solver.run_iterations(step);
+
+          done += step;
+          m_pg5->setIteration(done, total);
+          m_pg5->setProgress(done, total);
+          Fl::check();
+      }
+
+      m_average_strategy = solver.average_strategy();
     }
 
     {
