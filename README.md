@@ -26,18 +26,14 @@ Input the following:
 - Stack Size
 - Starting Pot
 - Initial Min Bet
-- All-In Threshold (default: 0.67)
 - Pot Type (Single Raise, 3-bet, 4-bet), used to automaticlly preset Ranges
 - Your Position (SB, BB, UTG, UTG+1, MP, LJ, HJ, CO, BTN)
 - Their Position
 - Iterations (default: 100)
-- Min Exploitability % (default: 0.1%, set to 0 to never stop early)
-- ~~Thread Count (default: CPU cores - 1)~~  currently unimplemented
 - CFR Resolver (default: GPU) 
 
 Options:
 - Auto-import ranges – automatically loads ranges based on positions and pot type 
-- Force Donk Check – ~~disables donk bets on flop~~ (recommended for memory savings) currently unimplemented
 
 ---
 
@@ -69,7 +65,7 @@ Use Back to return to inputs and solve a different game.
 ---
 
 ## 🪟 Windows Installation
-1. Go to the Releases tab and download `utg_windows.zip`: https://github.com/24parida/shark-2.0/releases
+1. Go to the Releases tab and download `UnderTheGun_1.1.0_windows.zip`: https://github.com/quwin/UnderTheGun/releases
 2. Unzip the folder
 3. Inside the folder, double-click underthegun.exe
 4. Windows may warn you about an untrusted app — click More Options → Run Anyway
@@ -89,6 +85,8 @@ https://github.com/24parida/shark-2.0/
 
 ### Key Improvements:
 - Implemented GPU-Accelerated Counterfactual Regret Minimization
+- Decreased RAM requirements for large trees by up to 60%
+- Increased CFR iteration speed by up to 5x (depending on GPU vs CPU performance)
 - Collapse All-in calls to just Expected Value
 - Various Bug fixes 
 - Support for asymmetric ranges
