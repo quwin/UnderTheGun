@@ -49,6 +49,7 @@
 
 // GUI components
 #include "cfr_cpu.hpp"
+#include "file_helper.hpp"
 #include "components/Page1_Settings.hh"
 #include "components/Page2_Board.hh"
 #include "components/Page3_HeroRange.hh"
@@ -476,6 +477,7 @@ class Wizard : public Fl_Double_Window {
       Fl::check();
       m_game = std::make_unique<poker::Game>(std::move(built));
         poker::GpuCfrConfig cfr_config;
+        cfr_config.evaluator_data_dir = evaluator_table_dir_next_to_exe().string();
         cfr_config.num_players = 2;
         cfr_config.synchronize_each_iteration = false;
         cfr_config.threads_per_block = 256;
