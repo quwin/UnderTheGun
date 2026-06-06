@@ -1,10 +1,6 @@
 #include "cfr_cpu.hpp"
 
 #include <algorithm>
-#include <cassert>
-#include <cmath>
-#include <cstddef>
-#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -103,8 +99,7 @@ CpuCfrSolver::CpuCfrSolver(
 
     stats_.tensor_entries = game_.cfr_tensor_entries();
     stats_.state_bucket_entries = game_.state_bucket_entries();
-    stats_.hand_pair_count =
-        static_cast<std::size_t>(game_.hand_pairs.pair_count());
+    stats_.hand_pair_count = static_cast<std::size_t>(game_.hand_pairs.pair_count());
 
     initialize_uniform_strategy();
 }

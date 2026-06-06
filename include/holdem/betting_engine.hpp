@@ -26,7 +26,7 @@ public:
     //   call
     //   raise 2.5x
     //   all-in
-    std::vector<Action> legal_actions(
+    [[nodiscard]] std::vector<Action> legal_actions(
         const PublicState& state,
         const BettingAbstraction& abstraction
     ) const;
@@ -43,7 +43,7 @@ public:
     //   last_aggressor
     //   terminal flags
     //   action history
-    PublicState apply_action(
+    [[nodiscard]] PublicState apply_action(
         const PublicState& state,
         const Action& action
     ) const;
@@ -71,24 +71,24 @@ public:
     ) ;
 private:
     // Legal-action helpers.
-    std::vector<Action> legal_unopened_actions(
+    [[nodiscard]] std::vector<Action> legal_unopened_actions(
         const PublicState& state,
         const BettingAbstraction& abstraction
     ) const;
 
-    std::vector<Action> legal_facing_bet_actions(
+    [[nodiscard]] std::vector<Action> legal_facing_bet_actions(
         const PublicState& state,
         const BettingAbstraction& abstraction
     ) const;
 
     // Converts abstract bet sizes into concrete chip actions.
-    int resolve_first_bet_amount(
+    [[nodiscard]] int resolve_first_bet_amount(
         const PublicState& state,
         const BetSize& size,
         const BettingAbstraction& abstraction
     ) const;
 
-    int resolve_raise_to_amount(
+    [[nodiscard]] int resolve_raise_to_amount(
         const PublicState& state,
         const BetSize& size,
         const BettingAbstraction& abstraction
@@ -99,15 +99,15 @@ private:
         const PublicState& state
     ) ;
 
-    int opponent_stack(
+    [[nodiscard]] int opponent_stack(
         const PublicState& state
     ) const;
 
-    int actor_committed(
+    [[nodiscard]] int actor_committed(
         const PublicState& state
     ) const;
 
-    int opponent_committed(
+    [[nodiscard]] int opponent_committed(
         const PublicState& state
     ) const;
 
@@ -115,7 +115,7 @@ private:
         const PublicState& state
     ) ;
 
-    int actor_total_stack_available_this_street(
+    [[nodiscard]] int actor_total_stack_available_this_street(
         const PublicState& state
     ) const;
 
@@ -123,11 +123,11 @@ private:
         const PublicState& state
     ) ;
 
-    int max_legal_commitment(
+    [[nodiscard]] int max_legal_commitment(
         const PublicState& state
     ) const;
 
-    bool can_raise(
+    [[nodiscard]] bool can_raise(
         const PublicState& state,
         const BettingAbstraction& abstraction
     ) const;

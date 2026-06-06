@@ -19,8 +19,8 @@ struct PrivateState {
     PrivateState() = default;
 
     PrivateState(
-        HoleCards p0,
-        HoleCards p1
+        const HoleCards p0,
+        const HoleCards p1
     )
         : p0_hand(p0),
           p1_hand(p1) {
@@ -38,7 +38,7 @@ struct PrivateState {
         }
     }
 
-    HoleCards hand_for(Player player) const {
+    [[nodiscard]] HoleCards hand_for(const Player player) const {
         switch (player) {
             case Player::P0:
                 return p0_hand;
@@ -53,7 +53,7 @@ struct PrivateState {
         }
     }
 
-    HoleCards opponent_hand_for(Player player) const {
+    [[nodiscard]] HoleCards opponent_hand_for(Player player) const {
         switch (player) {
             case Player::P0:
                 return p1_hand;
@@ -68,27 +68,27 @@ struct PrivateState {
         }
     }
 
-    DeckMask p0_mask() const {
+    [[nodiscard]] DeckMask p0_mask() const {
         return hand_mask(p0_hand);
     }
 
-    DeckMask p1_mask() const {
+    [[nodiscard]] DeckMask p1_mask() const {
         return hand_mask(p1_hand);
     }
 
-    DeckMask mask() const {
+    [[nodiscard]] DeckMask mask() const {
         return p0_mask() | p1_mask();
     }
 
-    bool contains(phevaluator::Card card) const {
+    [[nodiscard]] bool contains(phevaluator::Card card) const {
         return p0_hand.contains(card) || p1_hand.contains(card);
     }
 
-    bool overlaps_mask(DeckMask dead_cards) const {
+    [[nodiscard]] bool overlaps_mask(DeckMask dead_cards) const {
         return masks_overlap(mask(), dead_cards);
     }
 
-    bool overlaps_board(const Board& board) const {
+    [[nodiscard]] bool overlaps_board(const Board& board) const {
         return overlaps_mask(board_mask(board));
     }
 };
@@ -103,15 +103,15 @@ inline bool operator!=(const PrivateState& a, const PrivateState& b) {
 }
 
 inline PrivateState make_private_state(
-    HoleCards p0_hand,
-    HoleCards p1_hand
+    const HoleCards p0_hand,
+    const HoleCards p1_hand
 ) {
     return PrivateState{p0_hand, p1_hand};
 }
 
 inline PrivateState make_private_state(
-    HandId p0_hand,
-    HandId p1_hand
+    const HandId p0_hand,
+    const HandId p1_hand
 ) {
     return PrivateState{
         hand_from_id(p0_hand),

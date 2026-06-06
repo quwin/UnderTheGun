@@ -1,3 +1,17 @@
+# To compile GUI:
+# Remove-Item -Recurse -Force build-release -ErrorAction SilentlyContinue
+#
+# cmake -S . -B build-release `
+#  -G "Visual Studio 17 2022" `
+#  -A x64 `
+#  -T "cuda=12.9" `
+#  -DCUDAToolkit_ROOT="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.9" `
+#  -DCMAKE_CUDA_ARCHITECTURES="61;75;80;86;89"
+#
+# cmake --build build-release --config Release --target package
+#
+# cpack --config build-release/CPackConfig.cmake -B build-release/package-output
+
 cmake_minimum_required(VERSION 3.24)
 
 project(UnderTheGun LANGUAGES CXX CUDA)
@@ -12,7 +26,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
-set(CMAKE_CUDA_ARCHITECTURES native CACHE STRING "CUDA architectures" FORCE)
+set(CMAKE_CUDA_ARCHITECTURES 61 75 80 86 89)
 
 # 3. Find dependencies
 find_package(CUDAToolkit REQUIRED)
@@ -50,8 +64,13 @@ target_link_libraries(gui_library
 )
 
 
-add_executable(under_the_gun_gui
+add_executable(under_the_gun_gui WIN32
         src/gui/gui.cpp
+)
+
+set_target_properties(under_the_gun_gui
+        PROPERTIES
+        OUTPUT_NAME "UnderTheGun"
 )
 
 target_include_directories(under_the_gun_gui
@@ -81,19 +100,74 @@ if (WIN32)
     )
 endif()
 # ---------------------------------------------------------------------------
+# Runtime evaluator table resources
+# ---------------------------------------------------------------------------
+
+set(UTG_EVALUATOR_TABLE_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/external/CUDA-Poker-Calculator/src/resources"
+)
+
+set(UTG_EVALUATOR_RUNTIME_DIR "evaluator_tables")
+
+function(copy_evaluator_tables_for_target target_name)
+    add_custom_command(
+            TARGET ${target_name}
+            POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:${target_name}>/${UTG_EVALUATOR_RUNTIME_DIR}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${UTG_EVALUATOR_TABLE_DIR}/binaries_by_id_data.txt"
+            "$<TARGET_FILE_DIR:${target_name}>/${UTG_EVALUATOR_RUNTIME_DIR}/binaries_by_id_data.txt"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${UTG_EVALUATOR_TABLE_DIR}/suitbit_by_id_data.txt"
+            "$<TARGET_FILE_DIR:${target_name}>/${UTG_EVALUATOR_RUNTIME_DIR}/suitbit_by_id_data.txt"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${UTG_EVALUATOR_TABLE_DIR}/flush_data.txt"
+            "$<TARGET_FILE_DIR:${target_name}>/${UTG_EVALUATOR_RUNTIME_DIR}/flush_data.txt"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${UTG_EVALUATOR_TABLE_DIR}/noflush7_data.txt"
+            "$<TARGET_FILE_DIR:${target_name}>/${UTG_EVALUATOR_RUNTIME_DIR}/noflush7_data.txt"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${UTG_EVALUATOR_TABLE_DIR}/suits_data.txt"
+            "$<TARGET_FILE_DIR:${target_name}>/${UTG_EVALUATOR_RUNTIME_DIR}/suits_data.txt"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${UTG_EVALUATOR_TABLE_DIR}/dp_data.txt"
+            "$<TARGET_FILE_DIR:${target_name}>/${UTG_EVALUATOR_RUNTIME_DIR}/dp_data.txt"
+            COMMENT "Copying CUDA hand evaluator tables for ${target_name}"
+    )
+endfunction()
+
+copy_evaluator_tables_for_target(under_the_gun_gui)
+
+install(
+        TARGETS under_the_gun_gui
+        RUNTIME DESTINATION .
+)
+
+install(
+        FILES
+        "${UTG_EVALUATOR_TABLE_DIR}/binaries_by_id_data.txt"
+        "${UTG_EVALUATOR_TABLE_DIR}/suitbit_by_id_data.txt"
+        "${UTG_EVALUATOR_TABLE_DIR}/flush_data.txt"
+        "${UTG_EVALUATOR_TABLE_DIR}/noflush7_data.txt"
+        "${UTG_EVALUATOR_TABLE_DIR}/suits_data.txt"
+        "${UTG_EVALUATOR_TABLE_DIR}/dp_data.txt"
+        DESTINATION evaluator_tables
+)
+# ---------------------------------------------------------------------------
 # PokerHandEvaluator
 # ---------------------------------------------------------------------------
 
 set(BUILD_CARD5 OFF CACHE BOOL "" FORCE)
 set(BUILD_CARD6 OFF CACHE BOOL "" FORCE)
-set(BUILD_CARD7 OFF  CACHE BOOL "" FORCE)
+set(BUILD_CARD7 ON  CACHE BOOL "" FORCE)
 set(BUILD_PLO4 OFF CACHE BOOL "" FORCE)
 set(BUILD_PLO5 OFF CACHE BOOL "" FORCE)
 set(BUILD_PLO6 OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 
-add_subdirectory(external/PokerHandEvaluator/cpp pheval EXCLUDE_FROM_ALL)
+add_subdirectory(external/PokerHandEvaluator/cpp)
 
 get_target_property(PHEVAL_OPTIONS pheval INTERFACE_COMPILE_OPTIONS)
 if (PHEVAL_OPTIONS)
@@ -144,6 +218,15 @@ add_library(kuhn_gpu_cfr_lib
         cuda/kernels.cu
         cuda/kernels.hpp
         src/game.cpp
+        src/evaluator_table.cpp
+        include/file_helper.hpp
+)
+
+add_library(cuda_evaluator7 STATIC IMPORTED)
+
+set_target_properties(cuda_evaluator7 PROPERTIES
+        IMPORTED_LOCATION
+        "../external/CUDA-Poker-Calculator/lib-cuda/evaluator7.lib"
 )
 
 target_include_directories(kuhn_gpu_cfr_lib
@@ -158,9 +241,10 @@ target_compile_features(kuhn_gpu_cfr_lib
 )
 
 target_link_libraries(kuhn_gpu_cfr_lib
-        PRIVATE
+        PUBLIC
         pheval
         CUDA::cudart
+        cuda_evaluator7
 )
 
 target_compile_definitions(kuhn_gpu_cfr_lib
@@ -170,24 +254,24 @@ target_compile_definitions(kuhn_gpu_cfr_lib
 
 set_target_properties(kuhn_gpu_cfr_lib
         PROPERTIES
-        CUDA_SEPARABLE_COMPILATION OFF
-        CUDA_RESOLVE_DEVICE_SYMBOLS OFF
+        CUDA_SEPARABLE_COMPILATION ON
+        CUDA_RESOLVE_DEVICE_SYMBOLS ON
 )
 
 # ------------------------------------------------------------------------------
-# Main executable
+# Benchmark executable
 # ------------------------------------------------------------------------------
 
-add_executable(UnderTheGun
+add_executable(UnderTheGunBenchmark
         src/main.cpp
 )
 
-target_link_libraries(UnderTheGun
+target_link_libraries(UnderTheGunBenchmark
         PRIVATE
         kuhn_gpu_cfr_lib
 )
 
-set_target_properties(UnderTheGun
+set_target_properties(UnderTheGunBenchmark
         PROPERTIES
         LINKER_LANGUAGE CUDA
         CUDA_SEPARABLE_COMPILATION ON
@@ -211,7 +295,17 @@ add_test(
         NAME test_solver_validity
         COMMAND test_solver_validity
 )
-
+add_executable(test_gpu_strategy
+        tests/test_gpu_strategy.cpp
+)
+target_link_libraries(test_gpu_strategy
+        PRIVATE
+        kuhn_gpu_cfr_lib
+)
+add_test(
+        NAME test_gpu_strategy
+        COMMAND test_gpu_strategy
+)
 
 add_executable(test_betting_engine
         tests/test_betting_engine.cpp
@@ -293,3 +387,46 @@ add_test(
         NAME test_flop_subgame_tree
         COMMAND test_flop_subgame_tree
 )
+
+include(GNUInstallDirs)
+
+install(
+        TARGETS under_the_gun_gui
+        RUNTIME DESTINATION .
+)
+
+install(
+        FILES
+        $<TARGET_RUNTIME_DLLS:under_the_gun_gui>
+        DESTINATION .
+)
+
+install(
+        CODE [[
+        file(GET_RUNTIME_DEPENDENCIES
+            EXECUTABLES "$<TARGET_FILE:under_the_gun_gui>"
+            RESOLVED_DEPENDENCIES_VAR resolved_deps
+            UNRESOLVED_DEPENDENCIES_VAR unresolved_deps
+        )
+
+        foreach(dep IN LISTS resolved_deps)
+            file(INSTALL
+                DESTINATION "${CMAKE_INSTALL_PREFIX}"
+                TYPE FILE
+                FILES "${dep}"
+            )
+        endforeach()
+
+        if(unresolved_deps)
+            message(WARNING "Unresolved runtime dependencies: ${unresolved_deps}")
+        endif()
+    ]]
+)
+
+set(CPACK_PACKAGE_NAME "UnderTheGun")
+set(CPACK_PACKAGE_VENDOR "UnderTheGun")
+set(CPACK_PACKAGE_VERSION "1.1.0")
+set(CPACK_GENERATOR "ZIP")
+set(CPACK_PACKAGE_FILE_NAME "UnderTheGun-${CPACK_PACKAGE_VERSION}-windows-x64")
+
+include(CPack)

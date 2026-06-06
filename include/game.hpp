@@ -17,7 +17,7 @@ enum class Player : std::int8_t  {
     P1       = 1,
     Terminal = 2
 };
-inline std::string to_string(Player player) {
+inline std::string to_string(const Player player) {
     switch (player) {
         case Player::Chance:
             return "Chance";
@@ -60,6 +60,14 @@ inline bool operator!=(const GameAction& a, const GameAction& b) {
 inline std::string to_string(const GameAction& action) {
     return "type=" + std::to_string(action.action_type) + ":amount=" + std::to_string(action.amount);
 }
+
+struct TerminalRecord {
+    TerminalType type;
+    BoardIndex board_index;
+    int pot;
+    int p0_committed;
+};
+
 // -----------------------------------------------------------------------------
 // Connection between two Nodes:
 // -----------------------------------------------------------------------------
@@ -211,7 +219,7 @@ struct ActionState {
 // Memory estimate
 // -----------------------------------------------------------------------------
 
-struct GameMemoryEstimate {
+struct GameMemory {
     std::size_t node_bytes = 0;
     std::size_t edge_bytes = 0;
     std::size_t action_bytes = 0;
@@ -261,10 +269,10 @@ public:
     HandDomain p1_hands;
     HandPairTable hand_pairs;
 
-    std::vector<int> terminal_nodes;
-    // terminal_index_by_node[node_id] = terminal index, or -1 for nonterminal.
-    std::vector<int> terminal_index_by_node;
+    std::vector<TerminalRecord> terminal_records;
     std::vector<float> terminal_value_p0;
+
+    Board starting_board;
 
     Game() = default;
     void print_game_memory_usage() const;
@@ -299,9 +307,9 @@ public:
         HandPairTable pairs
     );
 
-    const HandDomain& hand_domain(Player player) const;
+    [[nodiscard]] const HandDomain& hand_domain(Player player) const;
     HandDomain& hand_domain(Player player);
-    int bucket_count(Player player) const;
+    [[nodiscard]] int bucket_count(Player player) const;
 
     // ---------------------------------------------------------------------
     // Action-state registration
@@ -316,27 +324,27 @@ public:
     // Accessors
     // ---------------------------------------------------------------------
 
-    const PublicNode& node(int id) const;
+    [[nodiscard]] const PublicNode& node(int id) const;
     PublicNode& node(int id);
 
-    const NodeEdge& edge(int id) const;
+    [[nodiscard]] const NodeEdge& edge(int id) const;
     NodeEdge& edge(int id);
 
-    const GameAction& action(int id) const;
+    [[nodiscard]] const GameAction& action(int id) const;
     GameAction& action(int id);
 
-    const ActionState& action_state(int id) const;
+    [[nodiscard]] const ActionState& action_state(int id) const;
     ActionState& action_state(int id);
 
-    int num_nodes() const;
-    int num_edges() const;
-    int num_actions() const;
-    int num_action_states() const;
+    [[nodiscard]] int num_nodes() const;
+    [[nodiscard]] int num_edges() const;
+    [[nodiscard]] int num_actions() const;
+    [[nodiscard]] int num_action_states() const;
 
-    std::size_t cfr_tensor_entries() const;
-    std::size_t state_bucket_entries() const;
+    [[nodiscard]] std::size_t cfr_tensor_entries() const;
+    [[nodiscard]] std::size_t state_bucket_entries() const;
 
-    GameMemoryEstimate estimate_memory() const;
+    [[nodiscard]] GameMemory estimate_memory() const;
 
     void validate() const;
 
@@ -351,49 +359,49 @@ private:
 // Inline accessors
 // -----------------------------------------------------------------------------
 
-inline const PublicNode& Game::node(int id) const {
+inline const PublicNode& Game::node(const int id) const {
     assert(id >= 0);
     assert(id < static_cast<int>(nodes.size()));
     return nodes[static_cast<std::size_t>(id)];
 }
 
-inline PublicNode& Game::node(int id) {
+inline PublicNode& Game::node(const int id) {
     assert(id >= 0);
     assert(id < static_cast<int>(nodes.size()));
     return nodes[static_cast<std::size_t>(id)];
 }
 
-inline const NodeEdge& Game::edge(int id) const {
+inline const NodeEdge& Game::edge(const int id) const {
     assert(id >= 0);
     assert(id < static_cast<int>(edges.size()));
     return edges[static_cast<std::size_t>(id)];
 }
 
-inline NodeEdge& Game::edge(int id) {
+inline NodeEdge& Game::edge(const int id) {
     assert(id >= 0);
     assert(id < static_cast<int>(edges.size()));
     return edges[static_cast<std::size_t>(id)];
 }
 
-inline const GameAction& Game::action(int id) const {
+inline const GameAction& Game::action(const int id) const {
     assert(id >= 0);
     assert(id < static_cast<int>(actions.size()));
     return actions[static_cast<std::size_t>(id)];
 }
 
-inline GameAction& Game::action(int id) {
+inline GameAction& Game::action(const int id) {
     assert(id >= 0);
     assert(id < static_cast<int>(actions.size()));
     return actions[static_cast<std::size_t>(id)];
 }
 
-inline const ActionState& Game::action_state(int id) const {
+inline const ActionState& Game::action_state(const int id) const {
     assert(id >= 0);
     assert(id < static_cast<int>(action_states.size()));
     return action_states[static_cast<std::size_t>(id)];
 }
 
-inline ActionState& Game::action_state(int id) {
+inline ActionState& Game::action_state(const int id) {
     assert(id >= 0);
     assert(id < static_cast<int>(action_states.size()));
     return action_states[static_cast<std::size_t>(id)];
@@ -448,7 +456,7 @@ inline const HandDomain& Game::hand_domain(Player player) const {
     throw std::invalid_argument("hand_domain requires P0 or P1.");
 }
 
-inline HandDomain& Game::hand_domain(Player player) {
+inline HandDomain& Game::hand_domain(const Player player) {
     if (player == Player::P0) {
         return p0_hands;
     }
@@ -466,9 +474,9 @@ inline HandDomain& Game::hand_domain(Player player) {
 
 inline std::size_t strategy_tensor_index(
     const Game& game,
-    int action_state_id,
-    int bucket,
-    int local_action
+    const int action_state_id,
+    const int bucket,
+    const int local_action
 ) {
     return game.action_state(action_state_id).tensor_index(
         bucket,

@@ -51,15 +51,13 @@ public:
   int getStartingPot() const;
   int getMinBet() const;
   int getIterations() const;
-  int getThreadCount() const;
-  float getAllInThreshold() const;
-  float getMinExploitability() const;
-  const char* getPotType() const;
 
+  const char* getPotType() const;
   const char *getCFRRenderer() const;
 
   const char* getYourPosition() const;
   const char* getTheirPosition() const;
+
   bool getAutoImport() const;
   bool getForceDonkCheck() const;
 

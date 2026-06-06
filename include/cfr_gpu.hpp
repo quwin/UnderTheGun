@@ -11,24 +11,22 @@ namespace poker {
 // GPU CFR configuration / stats
 // -----------------------------------------------------------------------------
 
-enum class GpuTerminalMode : int {
-    // Terminal values are supplied by host code as:
-    //
-    //   terminal_value[terminal_index][hand_pair]
-    //
-    // This is simplest for validation.
-    HostPrecomputed = 0,
-
-    // Terminal values are computed on device from board, terminal type,
+enum class TerminalMode : int {
+    // Terminal values are supplied by the game tree as: terminal_value[terminal_index][hand_pair]
+    // This is simplest for validation, but takes up [terminal_nodes] * sizeOf(float) * [hand_pairs] memory,
+    // quickly scaling out of hands
+    ValuePrecomputed = 0,
+    // Terminal values are computed during CFR from board, terminal type,
     // hand domains, and hand-pair table.
-    //
-    // Use this later for performance.
-    DeviceComputed = 1
+    // Instead, takes [total_nodes] * sizeOf(TerminalRecord) memory
+    RecordComputed = 1,
+    // Debug value to create both terminal_values and TerminalRecords.
+    DebugComputed = 2,
 };
 
 struct GpuCfrConfig {
     int num_players = 2;
-    int threads_per_block = 256;
+    int threads_per_block = 512;
     // CFR+ clips cumulative regret at zero after each update.
     bool use_cfr_plus = false;
     // Vanilla CFR uses average weight 1.
@@ -37,7 +35,11 @@ struct GpuCfrConfig {
     // Debug only. Synchronizing every iteration is expensive.
     bool synchronize_each_iteration = false;
     // Terminal evaluation mode.
-    GpuTerminalMode terminal_mode = GpuTerminalMode::HostPrecomputed;
+    TerminalMode terminal_mode = TerminalMode::RecordComputed;
+    // 0 means auto-select from available VRAM.
+    int pair_chunk_size = 0;
+    double vram_usage_fraction = 0.85;
+    std::string evaluator_data_dir = "../external/CUDA-Poker-Calculator/src/resources";
 };
 
 struct GpuCfrStats {
@@ -152,13 +154,10 @@ struct FlatHandData {
     int p1_hand_count = 0;
     int hand_pair_count = 0;
 
-    // Exact hand ids, domain-local.
-    std::vector<HandId> p0_hands;
-    std::vector<HandId> p1_hands;
-
-    // Optional masks for faster overlap / terminal evaluation kernels.
-    std::vector<std::uint64_t> p0_hand_mask;
-    std::vector<std::uint64_t> p1_hand_mask;
+    std::vector<unsigned char> p0_hand_card0;
+    std::vector<unsigned char> p0_hand_card1;
+    std::vector<unsigned char> p1_hand_card0;
+    std::vector<unsigned char> p1_hand_card1;
 
     // HandPairTable, flat pair arrays.
     //
@@ -186,19 +185,14 @@ struct FlatHandData {
 // -----------------------------------------------------------------------------
 
 struct FlatTerminalData {
-    // terminal_nodes[t] gives the public node id for terminal index t.
     std::vector<int> terminal_nodes;
-
-    // terminal_index_by_node[node_id] gives terminal index, or -1.
     std::vector<int> terminal_index_by_node;
-
-    // HostPrecomputed mode:
-    //
-    //   terminal_value_p0[
-    //       terminal_index * hand_pair_count + hand_pair_id
-    //   ]
-    //
-    // Value is from P0 perspective.
+    // DeviceComputed mode:
+    std::vector<int> terminal_type;
+    std::vector<unsigned char> terminal_board_cards; // terminal_count * 5
+    std::vector<int> pot;
+    std::vector<int> p0_committed;
+    // HostPrecomputed mode only:
     std::vector<float> terminal_value_p0;
 
     [[nodiscard]] int terminal_count() const {
@@ -211,26 +205,18 @@ struct FlatTerminalData {
 // -----------------------------------------------------------------------------
 
 FlatPublicGame flatten_public_game_for_gpu(
-    const Game& game
+    const Game& game,
+    FlatTerminalData& flat_terminal_data
 );
 
 FlatHandData flatten_hand_data_for_gpu(
     const Game& game
 );
 
-// This version only builds terminal metadata, not values.
-FlatTerminalData flatten_terminal_metadata_for_gpu(
-    const Game& game
-);
-
-// This version accepts precomputed terminal values from caller.
-//
-// expected size:
-//
-//   terminal_nodes.size() * game.hand_pairs.pair_count()
-FlatTerminalData flatten_terminal_data_for_gpu(
+void flatten_terminal_data_for_gpu(
     const Game& game,
-    const std::vector<float>& terminal_value_p0
+    FlatTerminalData& flat,
+    TerminalMode terminal_mode
 );
 
 // -----------------------------------------------------------------------------
@@ -322,11 +308,10 @@ struct DeviceHandData {
     int p1_hand_count = 0;
     int hand_pair_count = 0;
 
-    HandId* d_p0_hands = nullptr;
-    HandId* d_p1_hands = nullptr;
-
-    std::uint64_t* d_p0_hand_mask = nullptr;
-    std::uint64_t* d_p1_hand_mask = nullptr;
+    unsigned char* d_p0_hand_card0 = nullptr;
+    unsigned char* d_p0_hand_card1 = nullptr;
+    unsigned char* d_p1_hand_card0 = nullptr;
+    unsigned char* d_p1_hand_card1 = nullptr;
 
     int* d_p0_pair_index = nullptr;
     int* d_p1_pair_index = nullptr;
@@ -347,16 +332,15 @@ struct DeviceTerminalData {
     int hand_pair_count = 0;
 
     int* d_terminal_nodes = nullptr;
-
-    // Length = num_nodes.
-    // -1 for nonterminal nodes.
     int* d_terminal_index_by_node = nullptr;
 
+    // DeviceComputed mode:
+    int* d_terminal_type = nullptr;
+    unsigned char* d_terminal_board_cards = nullptr;
+    int* d_pot = nullptr;
+    int* d_p0_committed = nullptr;
+
     // HostPrecomputed mode:
-    //
-    //   d_terminal_value_p0[
-    //       terminal_index * hand_pair_count + hand_pair_id
-    //   ]
     float* d_terminal_value_p0 = nullptr;
 };
 
@@ -383,50 +367,22 @@ struct DevicePublicCfrState {
 };
 
 // -----------------------------------------------------------------------------
-// Temporary per-iteration work buffers
+// Per-iteration work buffers
 // -----------------------------------------------------------------------------
-
 struct DevicePublicWorkBuffers {
     // ---------------------------------------------------------------------
     // Pair-level node values.
     // ---------------------------------------------------------------------
     //
     // In exact public-tree CFR, terminal values depend on private hand pair.
+    // The most direct layout is: node_pair_value[node_id * hand_pair_count + pair_id]
+    // This can be large, but is the clearest validation layout.
+    // Per-depth rolling buffers have been experimented with,
+    // but increase computation speeds Quadratically, and as such have been ruled out
     //
-    // The most direct layout is:
-    //
-    //   node_pair_value[node_id * hand_pair_count + pair_id]
-    //
-    // This can be large, but is the clearest validation layout. Later you can
-    // replace it with per-depth rolling buffers.
-
-    float* d_node_pair_value_p0 = nullptr; // TODO: Once correctness is stable, replace with per-depth rolling pair buffers or bucket-aggregated value buffers
-    float* d_node_pair_value_p0_next = nullptr;
+    float* d_node_pair_value_p0 = nullptr;
 
     std::size_t node_pair_value_entries = 0;
-
-    // ---------------------------------------------------------------------
-    // Action-state tensor values.
-    // ---------------------------------------------------------------------
-    //
-    // Length = tensor_entries.
-    //
-    //   action_value[
-    //       tensor_offset[state]
-    //     + bucket * action_count
-    //     + local_action
-    //   ]
-
-    float* d_action_value_p0 = nullptr;
-
-    // ---------------------------------------------------------------------
-    // State-bucket values / reaches.
-    // ---------------------------------------------------------------------
-    //
-    // Length = state_bucket_entries.
-
-    float* d_state_bucket_value_p0 = nullptr;
-
     // Pair-level forward reaches.
     //
     // Layout:
@@ -444,7 +400,6 @@ struct DevicePublicWorkBuffers {
     float* d_node_pair_reach_p0 = nullptr;
     float* d_node_pair_reach_p1 = nullptr;
     float* d_node_pair_reach_chance = nullptr;
-
     // State-bucket reaches.
     //
     // Layout:
@@ -453,14 +408,32 @@ struct DevicePublicWorkBuffers {
     //       action_state_bucket_offset[state] + bucket
     //
     // Used by regret update and average-strategy accumulation.
-    float* d_state_bucket_cf_reach = nullptr;
     float* d_state_bucket_own_reach = nullptr;
+    // Accumulated across all chunks, applied once per iteration.
+    float* d_regret_delta = nullptr;
+    int pair_chunk_size = 0;
 };
 
 // -----------------------------------------------------------------------------
 // Host/device ownership bundle
 // -----------------------------------------------------------------------------
+struct DeviceHandEvaluatorTables {
+    short* d_binaries_by_id = nullptr;
+    short* d_suitbit_by_id = nullptr;
+    short* d_flush = nullptr;
+    short* d_noflush7 = nullptr;
+    unsigned char* d_suits = nullptr;
+    int* d_dp = nullptr;
+};
 
+struct HostHandEvaluatorTables {
+    std::vector<short> binaries_by_id;
+    std::vector<short> suitbit_by_id;
+    std::vector<short> flush;
+    std::vector<short> noflush7;
+    std::vector<unsigned char> suits;
+    std::vector<int> dp;
+};
 struct GpuPublicState {
     FlatPublicGame flat;
     FlatHandData hands;
@@ -472,6 +445,9 @@ struct GpuPublicState {
 
     DevicePublicCfrState cfr;
     DevicePublicWorkBuffers work;
+
+    HostHandEvaluatorTables host_eval_tables;
+    DeviceHandEvaluatorTables eval_tables;
 };
 
 // -----------------------------------------------------------------------------
@@ -480,6 +456,8 @@ struct GpuPublicState {
 
 class GpuCfrSolver {
 public:
+    void upload_hand_evaluator_tables();
+
     // Uses HostPrecomputed terminal mode only if terminal values are later
     // supplied through set_terminal_values().
     explicit GpuCfrSolver(const Game& game);
@@ -566,13 +544,27 @@ private:
     // Iteration stages
     // ---------------------------------------------------------------------
 
-    void run_terminal_evaluation_pass() const;
+    void run_terminal_evaluation_pass_for_chunk(int pair_start, int active_pair_count) const;
 
-    void run_backward_value_pass();
+    void run_backward_value_pass_for_chunk(
+        int pair_start,
+        int active_pair_count
+    ) const;
 
-    void run_reach_pass();
+    void run_reach_pass_for_chunk(
+        int pair_start,
+        int active_pair_count
+    ) const;
 
-    void run_regret_update_pass();
+    void clear_iteration_accumulators() const;
+
+    void clear_chunk_node_buffers(int active_pair_count) const;
+
+    void run_action_value_pass_for_chunk(int pair_start, int active_pair_count) const;
+
+    void accumulate_regret_deltas_for_chunk(int pair_start, int active_pair_count) const;
+
+    void apply_regret_deltas() const;
 
     void run_average_strategy_accumulation_pass();
 

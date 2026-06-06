@@ -1,7 +1,6 @@
 #pragma once
 
 #include "../game.hpp"
-#include "action.hpp"
 #include "betting_state.hpp"
 #include "../poker/board.hpp"
 #include <stdexcept>
@@ -33,7 +32,7 @@ struct PublicState {
     [[nodiscard]] bool is_terminal() const {
         return terminal_type != TerminalType::None;
     }
-    [[nodiscard]] int stack(Player player) const {
+    [[nodiscard]] int stack(const Player player) const {
         switch (player) {
             case Player::P0:
                 return p0_stack;

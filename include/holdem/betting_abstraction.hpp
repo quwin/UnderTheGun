@@ -16,9 +16,9 @@ enum class BetSizeType : int {
 
 struct BetSize {
     BetSizeType type = BetSizeType::PotFraction;
-    double value = 1.0;
+    float value = 1.0;
 
-    static BetSize pot_fraction(double fraction) {
+    static BetSize pot_fraction(const float fraction) {
         BetSize size;
         size.type = BetSizeType::PotFraction;
         size.value = fraction;
@@ -26,7 +26,7 @@ struct BetSize {
         return size;
     }
 
-    static BetSize raise_multiplier(double multiplier) {
+    static BetSize raise_multiplier(const float multiplier) {
         BetSize size;
         size.type = BetSizeType::RaiseMultiplier;
         size.value = multiplier;
@@ -34,10 +34,10 @@ struct BetSize {
         return size;
     }
 
-    static BetSize fixed_amount(int amount) {
+    static BetSize fixed_amount(const int amount) {
         BetSize size;
         size.type = BetSizeType::FixedAmount;
-        size.value = static_cast<double>(amount);
+        size.value = static_cast<float>(amount);
         size.validate();
         return size;
     }

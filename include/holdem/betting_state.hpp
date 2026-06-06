@@ -35,7 +35,7 @@ struct BettingState {
     //   bet-raise-reraise => num_raises_this_street = 2
     int num_raises_this_street = 0;
     int actions_this_street = 0;
-    int committed(Player player) const {
+    [[nodiscard]] int committed(Player player) const {
         switch (player) {
             case Player::P0:
                 return p0_committed_this_round;
@@ -49,7 +49,7 @@ struct BettingState {
                 );
         }
     }
-    void set_committed(Player player, int amount) {
+    void set_committed(const Player player, const int amount) {
         if (amount <= 0) {
             throw std::invalid_argument("Committed amount must be greater than zero.");
         }
@@ -68,7 +68,7 @@ struct BettingState {
         }
     }
 
-    void add_committed(Player player, int additional_chips) {
+    void add_committed(const Player player, const int additional_chips) {
         if (additional_chips < 0) {
             throw std::invalid_argument("Additional committed chips must be nonnegative.");
         }
@@ -88,36 +88,36 @@ struct BettingState {
     [[nodiscard]] bool bet_was_called() const {
         return has_live_bet() && commitments_matched();
     }
-    int amount_to_call(Player player) const {
+    [[nodiscard]] int amount_to_call(const Player player) const {
         const int needed = current_bet_to_call - committed(player);
         return needed > 0 ? needed : 0;
     }
 
-    bool player_is_facing_bet(Player player) const {
+    [[nodiscard]] bool player_is_facing_bet(const Player player) const {
         return amount_to_call(player) > 0;
     }
 
-    bool unopened() const {
+    [[nodiscard]] bool unopened() const {
         return current_bet_to_call == 0;
     }
 
-    bool has_live_bet() const {
+    [[nodiscard]] bool has_live_bet() const {
         return current_bet_to_call > 0;
     }
 
-    bool commitments_matched() const {
+    [[nodiscard]] bool commitments_matched() const {
         return p0_committed_this_round == p1_committed_this_round;
     }
 
-    int highest_commitment() const {
+    [[nodiscard]] int highest_commitment() const {
         return p0_committed_this_round > p1_committed_this_round ? p0_committed_this_round : p1_committed_this_round;
     }
 
-    int lowest_commitment() const {
+    [[nodiscard]] int lowest_commitment() const {
         return p0_committed_this_round < p1_committed_this_round ? p0_committed_this_round : p1_committed_this_round;
     }
 
-    int outstanding_call_amount() const {
+    [[nodiscard]] int outstanding_call_amount() const {
         return highest_commitment() - lowest_commitment();
     }
 

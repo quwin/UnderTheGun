@@ -28,51 +28,39 @@ Page1_Settings::Page1_Settings(int X, int Y, int W, int H)
   lblStack->labelsize(24);
   lblStack->labelfont(FL_HELVETICA_BOLD);
   lblStack->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
-  m_grid->widget(lblStack, 0, 1);
+  m_grid->widget(lblStack, 1, 1);
 
   m_inpStack = new Fl_Input(0, 0, 0, 0);
   m_inpStack->textsize(24);
-  m_inpStack->value("100");
-  m_grid->widget(m_inpStack, 0, 2);
+  m_inpStack->value("500");
+  m_grid->widget(m_inpStack, 1, 2);
 
   // Row 1: Starting Pot
   auto *lblPot = new Fl_Box(0, 0, 0, 0, "Starting Pot:");
   lblPot->labelsize(24);
   lblPot->labelfont(FL_HELVETICA_BOLD);
   lblPot->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
-  m_grid->widget(lblPot, 1, 1);
+  m_grid->widget(lblPot, 2, 1);
 
   m_inpPot = new Fl_Input(0, 0, 0, 0);
   m_inpPot->textsize(24);
-  m_inpPot->value("10");
-  m_grid->widget(m_inpPot, 1, 2);
+  m_inpPot->value("30");
+  m_grid->widget(m_inpPot, 2, 2);
 
   // Row 2: Min Bet
   auto *lblMinBet = new Fl_Box(0, 0, 0, 0, "Initial Min Bet:");
   lblMinBet->labelsize(24);
   lblMinBet->labelfont(FL_HELVETICA_BOLD);
   lblMinBet->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
-  m_grid->widget(lblMinBet, 2, 1);
+  m_grid->widget(lblMinBet, 3, 1);
 
   m_inpMinBet = new Fl_Input(0, 0, 0, 0);
   m_inpMinBet->textsize(24);
-  m_inpMinBet->value("2");
-  m_grid->widget(m_inpMinBet, 2, 2);
+  m_inpMinBet->value("15");
+  m_grid->widget(m_inpMinBet, 3, 2);
 
-  // Row 3: All-In Threshold
-  auto *lblAllIn = new Fl_Box(0, 0, 0, 0, "All-In Thresh:");
-  lblAllIn->labelsize(24);
-  lblAllIn->labelfont(FL_HELVETICA_BOLD);
-  lblAllIn->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
-  m_grid->widget(lblAllIn, 3, 1);
-
-  m_inpAllIn = new Fl_Float_Input(0, 0, 0, 0);
-  m_inpAllIn->textsize(24);
-  m_inpAllIn->value("0.67");
-  m_grid->widget(m_inpAllIn, 3, 2);
-
-  // Row 4: Pot Type
-  auto *lblPotType = new Fl_Box(0, 0, 0, 0, "Type of pot:");
+  // Row 3: Preset Player Ranges
+  auto *lblPotType = new Fl_Box(0, 0, 0, 0, "Imported Player Ranges:");
   lblPotType->labelsize(24);
   lblPotType->labelfont(FL_HELVETICA_BOLD);
   lblPotType->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
@@ -110,57 +98,42 @@ Page1_Settings::Page1_Settings(int X, int Y, int W, int H)
   m_choTheirPos->value(1);
   m_grid->widget(m_choTheirPos, 6, 2);
 
-  // Row 7: Iterations
-  auto *lblIters = new Fl_Box(0, 0, 0, 0, "Iterations:");
-  lblIters->labelsize(24);
-  lblIters->labelfont(FL_HELVETICA_BOLD);
-  lblIters->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
-  m_grid->widget(lblIters, 7, 1);
-
-  m_inpIters = new Fl_Input(0, 0, 0, 0);
-  m_inpIters->textsize(24);
-  m_inpIters->value("100");
-  m_grid->widget(m_inpIters, 7, 2);
-
-  // Row 8: Min Exploitability
-  auto *lblMinExploit = new Fl_Box(0, 0, 0, 0, "Min Exploit %:");
-  lblMinExploit->labelsize(24);
-  lblMinExploit->labelfont(FL_HELVETICA_BOLD);
-  lblMinExploit->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
-  m_grid->widget(lblMinExploit, 8, 1);
-
-  m_inpMinExploit = new Fl_Float_Input(0, 0, 0, 0);
-  m_inpMinExploit->textsize(24);
-  m_inpMinExploit->value("0.1");
-  m_grid->widget(m_inpMinExploit, 8, 2);
-
-  // Row 9: Thread Count
-  auto *lblThreads = new Fl_Box(0, 0, 0, 0, "Thread Count:");
-  lblThreads->labelsize(24);
-  lblThreads->labelfont(FL_HELVETICA_BOLD);
-  lblThreads->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
-  m_grid->widget(lblThreads, 9, 1);
-
-  m_inpThreads = new Fl_Float_Input(0, 0, 0, 0);
-  m_inpThreads->textsize(24);
-  // Default to (num_cores - 1), minimum 1
-  unsigned int numCores = std::thread::hardware_concurrency();
-  int defaultThreads = std::max(1, static_cast<int>(numCores) - 1);
-  m_inpThreads->value(std::to_string(defaultThreads).c_str());
-  m_grid->widget(m_inpThreads, 9, 2);
-
-  // Row 10: CFR Renderer
+  // Row 7: CFR Renderer
   auto *lblCfrRenderer = new Fl_Box(0, 0, 0, 0, "Solver Renderer:");
   lblCfrRenderer->labelsize(24);
   lblCfrRenderer->labelfont(FL_HELVETICA_BOLD);
   lblCfrRenderer->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
-  m_grid->widget(lblCfrRenderer, 10, 1);
+  m_grid->widget(lblCfrRenderer, 8, 1);
 
   m_choCFRRenderer = new Fl_Choice(0, 0, 0, 0);
   m_choCFRRenderer->textsize(24);
   m_choCFRRenderer->add("GPU|CPU");
   m_choCFRRenderer->value(0);
-  m_grid->widget(m_choCFRRenderer, 10, 2);
+  m_grid->widget(m_choCFRRenderer, 8, 2);
+
+  // Row 8: Iterations
+  auto *lblIters = new Fl_Box(0, 0, 0, 0, "Iterations:");
+  lblIters->labelsize(24);
+  lblIters->labelfont(FL_HELVETICA_BOLD);
+  lblIters->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
+  m_grid->widget(lblIters, 9, 1);
+
+  m_inpIters = new Fl_Input(0, 0, 0, 0);
+  m_inpIters->textsize(24);
+  m_inpIters->value("100");
+  m_grid->widget(m_inpIters, 9, 2);
+
+  // Row 9: Min Exploitability
+  auto *lblMinExploit = new Fl_Box(0, 0, 0, 0, "Min Exploit %:");
+  lblMinExploit->labelsize(24);
+  lblMinExploit->labelfont(FL_HELVETICA_BOLD);
+  lblMinExploit->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
+  m_grid->widget(lblMinExploit, 10, 1);
+
+  m_inpMinExploit = new Fl_Float_Input(0, 0, 0, 0);
+  m_inpMinExploit->textsize(24);
+  m_inpMinExploit->value("0.1");
+  m_grid->widget(m_inpMinExploit, 10, 2);
 
   // Column 4: Options on the right side (column 3 is gap)
   // Auto-import checkbox (row 0, aligned with Stack Size)
@@ -168,22 +141,21 @@ Page1_Settings::Page1_Settings(int X, int Y, int W, int H)
   m_chkAutoImport->labelsize(24);
   m_chkAutoImport->labelfont(FL_HELVETICA_BOLD);
   m_chkAutoImport->value(1);
-  m_grid->widget(m_chkAutoImport, 0, 4);  // Row 0, column 4
+  m_grid->widget(m_chkAutoImport, 1, 4);  // Row 0, column 4
 
   // Force Donk Check checkbox (row 1, right below Auto-import)
   m_chkForceDonkCheck = new Fl_Check_Button(0, 0, 0, 0, "Force Donk Check");
   m_chkForceDonkCheck->labelsize(24);
   m_chkForceDonkCheck->labelfont(FL_HELVETICA_BOLD);
   m_chkForceDonkCheck->value(1);  // Default enabled
-  m_grid->widget(m_chkForceDonkCheck, 1, 4);  // Row 1, column 4
+  m_grid->widget(m_chkForceDonkCheck, 2, 4);  // Row 1, column 4
 
   // Subtext for Force Donk Check (row 2, right below checkbox)
   auto *lblDonkSubtext = new Fl_Box(0, 0, 0, 0, "applied to flop only, recommended for memory savings");
   lblDonkSubtext->labelsize(12);
   lblDonkSubtext->labelfont(FL_HELVETICA_ITALIC);
   lblDonkSubtext->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE | FL_ALIGN_TOP);
-  m_grid->widget(lblDonkSubtext, 2, 4);  // Row 2, column 4
-
+  m_grid->widget(lblDonkSubtext, 3, 4);  // Row 2, column 4
 
   // Set column weights for resizing
   m_grid->col_weight(0, 5);   // Left spacer
@@ -214,9 +186,9 @@ Page1_Settings::Page1_Settings(int X, int Y, int W, int H)
 
   // Content (formatted with alignment - pipes aligned)
   m_panelBetSizesContent = new Fl_Box(0, 0, 0, 0,
-    "Flop :  50%, 100%       |  Raise: 100%\n"
-    "Turn :  33%, 66%, 100%  |  Raise: 50%, 100%\n"
-    "River:  33%, 66%, 100%  |  Raise: 50%, 100%");
+    "Flop :  50%, 100%  |  Raise: 150%, All-In\n"
+      "Turn :  50%, 100%  |  Raise: 150%, All-In\n"
+      "River:  50%, 100%  |  Raise: 150%, All-In");
   m_panelBetSizesContent->labelsize(13);  // Smaller to fit in box
   m_panelBetSizesContent->labelfont(FL_COURIER);  // Monospace for alignment
   m_panelBetSizesContent->labelcolor(FL_WHITE);
@@ -275,9 +247,6 @@ std::string Page1_Settings::validateInputs() const {
   const char* potStr = m_inpPot->value();
   const char* minBetStr = m_inpMinBet->value();
   const char* itersStr = m_inpIters->value();
-  const char* allInStr = m_inpAllIn->value();
-  const char* minExploitStr = m_inpMinExploit->value();
-  const char* threadsStr = m_inpThreads->value();
 
   // Check integer fields
   if (!isValidInt(stackStr))
@@ -289,22 +258,12 @@ std::string Page1_Settings::validateInputs() const {
   if (!isValidInt(itersStr))
     return "Iterations must be a valid integer";
 
-  // Check float fields
-  if (!isValidFloat(allInStr))
-    return "All-In Threshold must be a valid number";
-  if (!isValidFloat(minExploitStr))
-    return "Min Exploitability must be a valid number";
-  if (!isValidFloat(threadsStr))
-    return "Thread Count must be a valid number";
 
   // Get actual values
   int stackSize = atoi(stackStr);
   int pot = atoi(potStr);
   int minBet = atoi(minBetStr);
   int iters = atoi(itersStr);
-  float allIn = static_cast<float>(atof(allInStr));
-  float minExploit = static_cast<float>(atof(minExploitStr));
-  int threads = atoi(threadsStr);
 
   // Value range checks
   if (stackSize <= 0)
@@ -317,13 +276,6 @@ std::string Page1_Settings::validateInputs() const {
     return "Stack Size must be >= Initial Min Bet";
   if (iters <= 0)
     return "Iterations must be greater than 0";
-  if (allIn <= 0 || allIn > 1)
-    return "All-In Threshold must be between 0 and 1";
-  if (minExploit < 0 || minExploit > 100)
-    return "Min Exploitability must be between 0% and 100%";
-  if (threads <= 0)
-    return "Thread Count must be greater than 0";
-
   return "";  // Valid
 }
 
@@ -341,18 +293,6 @@ int Page1_Settings::getMinBet() const {
 
 int Page1_Settings::getIterations() const {
   return m_inpIters->value() ? atoi(m_inpIters->value()) : 0;
-}
-
-int Page1_Settings::getThreadCount() const {
-  return m_inpThreads->value() ? atoi(m_inpThreads->value()) : 0;
-}
-
-float Page1_Settings::getAllInThreshold() const {
-  return m_inpAllIn->value() ? static_cast<float>(atof(m_inpAllIn->value())) : 0.67f;
-}
-
-float Page1_Settings::getMinExploitability() const {
-  return m_inpMinExploit->value() ? static_cast<float>(atof(m_inpMinExploit->value())) : 0.1f;
 }
 
 const char* Page1_Settings::getPotType() const {

@@ -36,7 +36,7 @@
 #include <vector>
 
 // Native solver headers
-#include "cfr_cpu.hpp"
+// #include "cfr_cpu.hpp"
 #include "game.hpp"
 #include "holdem/action.hpp"
 #include "holdem/betting_abstraction.hpp"
@@ -48,6 +48,8 @@
 #include "cfr_gpu.hpp"
 
 // GUI components
+#include "cfr_cpu.hpp"
+#include "file_helper.hpp"
 #include "components/Page1_Settings.hh"
 #include "components/Page2_Board.hh"
 #include "components/Page3_HeroRange.hh"
@@ -218,13 +220,12 @@ poker::HandId hand_id_for_bucket(
 
 class Wizard : public Fl_Double_Window {
   struct UserInputs {
-    int stackSize{}, startingPot{}, minBet{}, iterations{}, threadCount{};
-    float allInThreshold{};
+    int stackSize{}, startingPot{}, minBet{}, iterations{};
+    float min_exploitability{};
     std::string potType, yourPos, theirPos;
     std::vector<std::string> board;
     std::vector<std::string> heroRange;
     std::vector<std::string> villainRange;
-    float min_exploitability{};
     bool autoImportRanges{true};
     bool forceDonkCheck{true};
   } m_data;
@@ -262,7 +263,7 @@ class Wizard : public Fl_Double_Window {
 
   struct SolveParams {
     int stackSize{0}, startingPot{0}, minBet{0}, iterations{0};
-    float allInThreshold{0}, minExploitability{0};
+    float minExploitability{0};
     std::string potType, yourPos, theirPos;
     std::vector<std::string> board;
     std::vector<std::string> heroRange;
@@ -273,7 +274,6 @@ class Wizard : public Fl_Double_Window {
              startingPot == other.startingPot &&
              minBet == other.minBet &&
              iterations == other.iterations &&
-             allInThreshold == other.allInThreshold &&
              minExploitability == other.minExploitability &&
              potType == other.potType &&
              yourPos == other.yourPos &&
@@ -286,13 +286,13 @@ class Wizard : public Fl_Double_Window {
   SolveParams m_lastSolveParams;
   bool m_hasCachedSolve{false};
 
-  static void cb1Next(Fl_Widget *, void *d) { ((Wizard *)d)->do1Next(); }
-  static void cb2Back(Fl_Widget *, void *d) { ((Wizard *)d)->doBack2(); }
-  static void cb2Next(Fl_Widget *, void *d) { ((Wizard *)d)->do2Next(); }
-  static void cb3Back(Fl_Widget *, void *d) { ((Wizard *)d)->doBack3(); }
-  static void cb3Next(Fl_Widget *, void *d) { ((Wizard *)d)->do3Next(); }
-  static void cb4Back(Fl_Widget *, void *d) { ((Wizard *)d)->doBack4(); }
-  static void cb4Next(Fl_Widget *, void *d) { ((Wizard *)d)->do4Next(); }
+  static void cb1Next(Fl_Widget *, void *d) { static_cast<Wizard *>(d)->do1Next(); }
+  static void cb2Back(Fl_Widget *, void *d) { static_cast<Wizard *>(d)->doBack2(); }
+  static void cb2Next(Fl_Widget *, void *d) { static_cast<Wizard *>(d)->do2Next(); }
+  static void cb3Back(Fl_Widget *, void *d) { static_cast<Wizard *>(d)->doBack3(); }
+  static void cb3Next(Fl_Widget *, void *d) { static_cast<Wizard *>(d)->do3Next(); }
+  static void cb4Back(Fl_Widget *, void *d) { static_cast<Wizard *>(d)->doBack4(); }
+  static void cb4Next(Fl_Widget *, void *d) { static_cast<Wizard *>(d)->do4Next(); }
 
   void do1Next() {
     std::string error = m_pg1->validateInputs();
@@ -311,11 +311,8 @@ class Wizard : public Fl_Double_Window {
     m_data.stackSize = m_pg1->getStackSize();
     m_data.startingPot = m_pg1->getStartingPot();
     m_data.minBet = m_pg1->getMinBet();
-    m_data.allInThreshold = m_pg1->getAllInThreshold();
-    m_data.iterations = m_pg1->getIterations();
-    m_data.threadCount = m_pg1->getThreadCount();
-    m_data.min_exploitability = m_pg1->getMinExploitability();
     m_data.potType = m_pg1->getPotType();
+    m_data.iterations = m_pg1->getIterations();
     m_data.yourPos = yourPos;
     m_data.theirPos = theirPos;
     m_data.autoImportRanges = m_pg1->getAutoImport();
@@ -393,7 +390,6 @@ class Wizard : public Fl_Double_Window {
     currentParams.startingPot = m_data.startingPot;
     currentParams.minBet = m_data.minBet;
     currentParams.iterations = m_data.iterations;
-    currentParams.allInThreshold = m_data.allInThreshold;
     currentParams.minExploitability = m_data.min_exploitability;
     currentParams.potType = m_data.potType;
     currentParams.yourPos = m_data.yourPos;
@@ -430,8 +426,8 @@ class Wizard : public Fl_Double_Window {
 
   [[nodiscard]] poker::holdem::BettingAbstraction make_gui_betting_abstraction() const {
     poker::holdem::BettingAbstraction abstraction = poker::holdem::make_standard_abstraction();
-    if (m_data.minBet > 0) {
-      abstraction.first_bet_sizes.insert(abstraction.first_bet_sizes.begin(), poker::holdem::BetSize::fixed_amount(m_data.minBet));
+    if (const float min_bet_ratio = static_cast<float>(m_data.minBet)/static_cast<float>(m_data.startingPot); abstraction.first_bet_sizes.front().value < min_bet_ratio) {
+      abstraction.first_bet_sizes[0] = poker::holdem::BetSize::pot_fraction(min_bet_ratio);
     }
     abstraction.validate();
     return abstraction;
@@ -461,39 +457,33 @@ class Wizard : public Fl_Double_Window {
     config.p1_range = villain_range;
     config.betting_abstraction = make_gui_betting_abstraction();
     config.collapse_all_in_runouts_to_ev = true;
-
-    m_pg5->setStatus("Building native Hold'em subgame tree...");
-    Fl::check();
-
-    poker::Game built = poker::holdem::HoldemSubgameBuilder(config).build();
-    const poker::GameMemoryEstimate estimatedMemory = built.estimate_memory();
-    const std::size_t availableMemory = MemoryUtil::getAvailableMemory();
-
-    m_pg5->setMemoryEstimate( sizeof(poker::Game) + estimatedMemory.game_owned_capacity_bytes, availableMemory);
-    Fl::check();
-
-    if (!m_pg5->isMemoryOk()) {
-      throw std::runtime_error(
-          "Not enough memory for this solve. Try reducing range sizes or solving from a later street.");
-    }
-
-    m_pg5->setStatus("Training native CFR solver...");
-    m_pg5->reset();
-    Fl::check();
-
-    m_game = std::make_unique<poker::Game>(std::move(built));
-
+    config.board_abstraction = poker::holdem::make_isomorphic_board_abstraction(config.p0_range, config.p1_range);
     const int total = std::max<int>(0, m_data.iterations);
     const int chunk = std::max<int>(1, total / 100);
 
     if (std::string(m_pg1->getCFRRenderer()) == "GPU") {
+      const std::size_t availableMemory = MemoryUtil::getAvailableMemory();
+      m_pg5->setMemoryEstimate( sizeof(poker::Game) + (config.memoryEstimate() / config.p0_range.hands_with_positive_weight().size() / config.p1_range.hands_with_positive_weight().size()), availableMemory);
+      Fl::check();
+      if (!m_pg5->isMemoryOk()) {
+        throw std::runtime_error("Not enough memory for this solve. Try reducing range sizes, solving from a later street, or using enabling GPU mode.");
+      }
+      m_pg5->setStatus("Building native Hold'em subgame tree...");
+      Fl::check();
+
+      poker::Game built = poker::holdem::HoldemSubgameBuilder(config).build();
+      m_pg5->setStatus("Training native CFR solver...");
+      m_pg5->reset();
+      Fl::check();
+      m_game = std::make_unique<poker::Game>(std::move(built));
         poker::GpuCfrConfig cfr_config;
+        cfr_config.evaluator_data_dir = evaluator_table_dir_next_to_exe().string();
         cfr_config.num_players = 2;
         cfr_config.synchronize_each_iteration = false;
-        cfr_config.threads_per_block = 512;
+        cfr_config.threads_per_block = 256;
         cfr_config.use_cfr_plus = false;
         cfr_config.linear_averaging = false;
-        cfr_config.terminal_mode = poker::GpuTerminalMode::HostPrecomputed;
+        cfr_config.terminal_mode = poker::TerminalMode::RecordComputed;
 
         poker::GpuCfrSolver solver(*m_game, cfr_config);
         for (int done = 0; done < total;) {
@@ -509,32 +499,50 @@ class Wizard : public Fl_Double_Window {
 
         m_average_strategy = solver.average_strategy();
     } else {
-        poker::CfrConfig cfr_config;
-        cfr_config.num_players = 2;
-        cfr_config.use_cfr_plus = false;
-        cfr_config.linear_averaging = false;
-        cfr_config.simultaneous_updates = true;
+      config.terminal_mode = poker::TerminalMode::ValuePrecomputed;
+      const std::size_t availableMemory = MemoryUtil::getAvailableMemory();
+      m_pg5->setMemoryEstimate( sizeof(poker::Game) + config.memoryEstimate(), availableMemory);
+      Fl::check();
+      if (!m_pg5->isMemoryOk()) {
+        throw std::runtime_error("Not enough memory for this solve. Try reducing range sizes, solving from a later street, or using enabling GPU mode.");
+      }
+      m_pg5->setStatus("Building native Hold'em subgame tree...");
+      Fl::check();
 
-        poker::TerminalValueProvider terminal_values;
+      poker::Game built = poker::holdem::HoldemSubgameBuilder(config).build();
 
-        poker::CpuCfrSolver solver(
-            *m_game,
-            terminal_values,
-            cfr_config
-        );
+      m_pg5->setStatus("Training native CFR solver...");
+      m_pg5->reset();
+      Fl::check();
 
-        for (int done = 0; done < total;) {
-            const int step = std::min<int>(chunk, total - done);
+      m_game = std::make_unique<poker::Game>(std::move(built));
 
-            solver.run_iterations(step);
+      poker::CfrConfig cfr_config;
+      cfr_config.num_players = 2;
+      cfr_config.use_cfr_plus = false;
+      cfr_config.linear_averaging = false;
+      cfr_config.simultaneous_updates = true;
 
-            done += step;
-            m_pg5->setIteration(done, total);
-            m_pg5->setProgress(done, total);
-            Fl::check();
-        }
+      poker::TerminalValueProvider terminal_values;
 
-        m_average_strategy = solver.average_strategy();
+      poker::CpuCfrSolver solver(
+          *m_game,
+          terminal_values,
+          cfr_config
+      );
+
+      for (int done = 0; done < total;) {
+          const int step = std::min<int>(chunk, total - done);
+
+          solver.run_iterations(step);
+
+          done += step;
+          m_pg5->setIteration(done, total);
+          m_pg5->setProgress(done, total);
+          Fl::check();
+      }
+
+      m_average_strategy = solver.average_strategy();
     }
 
     {
@@ -655,12 +663,11 @@ class Wizard : public Fl_Double_Window {
   void updatePotAndStacks(const poker::GameAction &action, poker::Player player) {
     using poker::holdem::ActionType;
     int &current_wager = (player == poker::Player::P0) ? m_p1_wager : m_p2_wager;
-    int &other_wager = (player == poker::Player::P0) ? m_p2_wager : m_p1_wager;
+    const int &other_wager = (player == poker::Player::P0) ? m_p2_wager : m_p1_wager;
     int &current_stack = (player == poker::Player::P0) ? m_p1_stack : m_p2_stack;
     int &other_stack = (player == poker::Player::P0) ? m_p2_stack : m_p1_stack;
 
-    const ActionType type = static_cast<ActionType>(action.action_type);
-    switch (type) {
+    switch (const auto type = static_cast<ActionType>(action.action_type)) {
       case ActionType::Fold:
         other_stack += m_current_pot + current_wager + other_wager;
         m_current_pot = 0;
@@ -692,7 +699,7 @@ class Wizard : public Fl_Double_Window {
     }
   }
 
-  void set_common_strategy_header() {
+  void set_common_strategy_header() const {
     std::string board = "Board: ";
     for (const auto &card : m_data.board) board += card + " ";
     m_pg6->setBoardInfo(board);
@@ -704,7 +711,7 @@ class Wizard : public Fl_Double_Window {
     m_pg6->setPotInfo(info);
   }
 
-  void updateStrategyDisplay() {
+  void updateStrategyDisplay() const {
     if (!m_game) return;
 
     if (current_is_terminal_only()) {
@@ -770,7 +777,7 @@ class Wizard : public Fl_Double_Window {
             const poker::HoleCards hand = poker::hand_from_id(hand_id);
 
             const std::string hand_type = hand_type_from_hole_cards(hand);
-            if (!handTypeStrategies.count(hand_type)) {
+            if (!handTypeStrategies.contains(hand_type)) {
                 handTypeStrategies[hand_type] = std::vector<float>(actions.size(), 0.0f);
                 handTypeCounts[hand_type] = 0;
             }

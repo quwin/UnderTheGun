@@ -35,6 +35,8 @@
 #include <utility>
 #include <vector>
 
+#include "cfr_gpu.hpp"
+
 namespace poker::holdem {
 namespace {
 GameAction to_game_action(const Action& action) {
@@ -42,70 +44,6 @@ GameAction to_game_action(const Action& action) {
         static_cast<int>(action.type),
         action.amount
     };
-}
-
-// Cases:
-//   start river:
-//     every node uses -1
-//   start turn:
-//     river node stores raw river card id
-//   start flop:
-//     flop/root nodes store -1
-//     turn nodes store raw turn card id
-//     river nodes store turn_card * 52 + river_card
-int encode_relative_board_index(
-    const Board& start_board,
-    const Board& board
-) {
-    if (board.size() < start_board.size()) {
-        throw std::invalid_argument(
-            "Board cannot be smaller than start_board."
-        );
-    }
-    if (board.size() == start_board.size()) {
-        return -1;
-    }
-    for (int i = 0; i < start_board.size(); ++i) {
-        if (board.cards[static_cast<std::size_t>(i)] !=
-            start_board.cards[static_cast<std::size_t>(i)]) {
-            throw std::invalid_argument(
-                "Board does not extend start_board prefix."
-            );
-        }
-    }
-    if (start_board.size() == 4) {
-        if (board.size() != 5) {
-            throw std::invalid_argument(
-                "Turn-start subgame can only encode river extension."
-            );
-        }
-        return board.cards[4];
-    }
-    if (start_board.size() == 3) {
-        if (board.size() == 4) {
-            return board.cards[3];
-        }
-        if (board.size() == 5) {
-            const int turn_card = board.cards[3];
-            const int river_card = board.cards[4];
-
-            return turn_card * kNumCards + river_card;
-        }
-        throw std::invalid_argument(
-            "Flop-start subgame can only encode turn/river extensions."
-        );
-    }
-    if (start_board.size() == 5) {
-        if (board.size() != 5) {
-            throw std::invalid_argument(
-                "River-start subgame cannot encode extra public cards."
-            );
-        }
-        return -1;
-    }
-    throw std::invalid_argument(
-        "Unsupported start board size for board_index encoding."
-    );
 }
 
 PublicNode make_node_from_public_state(
@@ -181,9 +119,12 @@ Game HoldemSubgameBuilder::build() const {
     Game game;
     game.num_players = 2;
     const PublicState root_state = config_.initial_public_state();
+    game.starting_board = root_state.board;
     initialize_hand_data(game, root_state.board);
-    all_in_equity_cache_ = std::make_unique<AllInEquityCache>();
-    all_in_equity_cache_->initialize_for_subgame(root_state.board, config_.p0_range, config_.p1_range);
+    if (config_.terminal_mode == TerminalMode::ValuePrecomputed) {
+        all_in_equity_cache_ = std::make_unique<AllInEquityCache>();
+        all_in_equity_cache_->initialize_for_subgame(root_state.board, config_.p0_range, config_.p1_range);
+    }
     const PublicNode root_node = make_node_from_public_state(
         root_state,
         PublicNodeType::Action,
@@ -192,8 +133,6 @@ Game HoldemSubgameBuilder::build() const {
     const int root_id = game.add_node(root_node);
     game.root = root_id;
     expand_public_state(game, root_id, root_state);
-    game.terminal_index_by_node.clear();
-    game.terminal_nodes.clear();
     return game;
 }
 
@@ -323,31 +262,49 @@ void HoldemSubgameBuilder::finalize_terminal_node(
     const PublicState& state
 ) const {
     PublicNode& node = game.node(node_id);
-
     node.type = PublicNodeType::Terminal;
     node.player = Player::Terminal;
-    if (game.terminal_index_by_node.size() <= node_id) {
-        game.terminal_index_by_node.resize(node_id + 1,-1);
-    }
-    if (game.terminal_index_by_node[node_id] != -1) {
-        throw std::logic_error(
-            "Terminal value row already exists for node."
-        );
-    }
-    const int terminal_index = static_cast<int>(game.terminal_nodes.size());
-    game.terminal_nodes.push_back(node_id);
-    game.terminal_index_by_node[node_id] = terminal_index;
-    const std::size_t old_size = game.terminal_value_p0.size();
-    const int hand_pair_count = game.hand_pairs.pair_count();
-    game.terminal_value_p0.resize(old_size + static_cast<std::size_t>(hand_pair_count),0.0f);
-    for (int pair_id = 0; pair_id < hand_pair_count; ++pair_id) {
-        const float value = terminal_value_for_pair(game,state,pair_id);
-        if (!std::isfinite(value)) {
-            throw std::runtime_error(
-                "Computed non-finite terminal value."
-            );
+    if (config_.terminal_mode == TerminalMode::RecordComputed) {
+        auto record = TerminalRecord();
+        record.type = state.terminal_type;
+        record.pot = state.pot;
+        record.p0_committed = state.betting.p0_committed_this_round;
+        record.board_index = make_board_index(game.starting_board, state.board);
+        game.terminal_records.emplace_back(record);
+    } else if (config_.terminal_mode == TerminalMode::ValuePrecomputed) {
+        const std::size_t old_size = game.terminal_value_p0.size();
+        const int hand_pair_count = game.hand_pairs.pair_count();
+        game.terminal_value_p0.resize(old_size + static_cast<std::size_t>(hand_pair_count),0.0f);
+        for (int pair_id = 0; pair_id < hand_pair_count; ++pair_id) {
+            const float value = terminal_value_for_pair(game,state,pair_id);
+            if (!std::isfinite(value)) {
+                throw std::runtime_error(
+                    "Computed non-finite terminal value."
+                );
+            }
+            game.terminal_value_p0[old_size + pair_id] = value;
         }
-        game.terminal_value_p0[old_size + pair_id] = value;
+    } else if (config_.terminal_mode == TerminalMode::DebugComputed) {
+        // Do both
+        auto record = TerminalRecord();
+        record.type = state.terminal_type;
+        record.pot = state.pot;
+        record.p0_committed = state.betting.p0_committed_this_round;
+        record.board_index = make_board_index(game.starting_board, state.board);
+        game.terminal_records.emplace_back(record);
+
+        const std::size_t old_size = game.terminal_value_p0.size();
+        const int hand_pair_count = game.hand_pairs.pair_count();
+        game.terminal_value_p0.resize(old_size + static_cast<std::size_t>(hand_pair_count),0.0f);
+        for (int pair_id = 0; pair_id < hand_pair_count; ++pair_id) {
+            const float value = terminal_value_for_pair(game,state,pair_id);
+            if (!std::isfinite(value)) {
+                throw std::runtime_error(
+                    "Computed non-finite terminal value."
+                );
+            }
+            game.terminal_value_p0[old_size + pair_id] = value;
+        }
     }
 }
 
@@ -373,6 +330,7 @@ float HoldemSubgameBuilder::terminal_value_for_pair(
     }
     return terminal_utility_p0(terminal_state, private_state, all_in_equity_cache_.get());
 }
+
 void HoldemSubgameBuilder::expand_action_node(
     Game& game,
     int node_id,
@@ -460,6 +418,16 @@ void HoldemSubgameBuilder::expand_public_chance_node(
             board_mask(state.board)
         );
 
+    // const DeckMask unavailable = board_mask(state.board);
+    // const int exact_count =
+    //     static_cast<int>(cards_from_mask(remaining_cards(unavailable)).size());
+    //
+    // std::cerr
+    //     << "[chance] board=" << poker::to_string(state.board)
+    //     << " exact=" << exact_count
+    //     << " transitions=" << transitions.size()
+    //     << " is_exact=" << config_.board_abstraction->is_exact()
+    //     << "\n";
     if (transitions.empty()) {
         throw std::logic_error(
             "Public chance node has no board transitions."

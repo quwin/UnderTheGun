@@ -386,32 +386,20 @@ int Game::register_action_state(
 // Memory estimate
 // -----------------------------------------------------------------------------
 
-GameMemoryEstimate Game::estimate_memory() const {
-    GameMemoryEstimate estimate;
+GameMemory Game::estimate_memory() const {
+    GameMemory estimate;
     // Used elements.
-    estimate.node_bytes =
-        sizeof(PublicNode) * nodes.size();
-    estimate.edge_bytes =
-        sizeof(NodeEdge) * edges.size();
-    estimate.action_bytes =
-        sizeof(GameAction) * actions.size();
-    estimate.action_state_bytes =
-        sizeof(ActionState) * action_states.size();
-    estimate.p0_hand_bytes =
-        sizeof(HandId) * p0_hands.hands.size();
-    estimate.p1_hand_bytes =
-        sizeof(HandId) * p1_hands.hands.size();
-    estimate.hand_pair_bytes =
-        sizeof(int) * (
-            hand_pairs.p0_index.size() +
-            hand_pairs.p1_index.size()
-        );
-    estimate.terminal_node_bytes =
-        sizeof(int) * terminal_nodes.size();
-    estimate.terminal_index_by_node_bytes =
-        sizeof(int) * terminal_index_by_node.size();
-    estimate.terminal_value_p0_bytes =
-        sizeof(float) * terminal_value_p0.size();
+    estimate.node_bytes = sizeof(PublicNode) * nodes.size();
+    estimate.edge_bytes = sizeof(NodeEdge) * edges.size();
+    estimate.action_bytes = sizeof(GameAction) * actions.size();
+    estimate.action_state_bytes = sizeof(ActionState) * action_states.size();
+    estimate.p0_hand_bytes = sizeof(HandId) * p0_hands.hands.size();
+    estimate.p1_hand_bytes = sizeof(HandId) * p1_hands.hands.size();
+    estimate.hand_pair_bytes =sizeof(int) * (hand_pairs.p0_index.size() +hand_pairs.p1_index.size());
+
+    estimate.terminal_value_p0_bytes = sizeof(float) * terminal_value_p0.size();
+    estimate.terminal_node_bytes = sizeof(TerminalRecord) * terminal_records.size();
+
     estimate.cfr_tensor_entries = cfr_tensor_entries();
     estimate.state_bucket_entries = state_bucket_entries();
     estimate.bytes_per_float_tensor =
@@ -445,9 +433,8 @@ GameMemoryEstimate Game::estimate_memory() const {
         vector_bytes_capacity(p1_hands.hands) +
         vector_bytes_capacity(hand_pairs.p0_index) +
         vector_bytes_capacity(hand_pairs.p1_index) +
-        vector_bytes_capacity(terminal_nodes) +
-        vector_bytes_capacity(terminal_index_by_node) +
-        vector_bytes_capacity(terminal_value_p0);
+        vector_bytes_capacity(terminal_value_p0) +
+        vector_bytes_capacity(terminal_records);
     return estimate;
 }
 // -----------------------------------------------------------------------------
@@ -817,8 +804,9 @@ void Game::validate() const {
         );
     }
 }
+
 void Game::print_game_memory_usage() const {
-    const GameMemoryEstimate m = estimate_memory();
+    const GameMemory m = estimate_memory();
 
     auto print = [](const char* name, std::size_t bytes) {
         std::cout

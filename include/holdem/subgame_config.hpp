@@ -6,6 +6,7 @@
 #include "board_abstraction.hpp"
 #include "hand_abstraction.hpp"
 #include "public_state.hpp"
+#include "cfr_gpu.hpp"
 
 #include "poker/board.hpp"
 #include "poker/range.hpp"
@@ -84,18 +85,17 @@ struct HoldemSubgameConfig {
     // Exact by default.
     //
     // Public-board abstraction affects public chance transitions only.
-    std::shared_ptr<const BoardAbstraction> board_abstraction =
-        make_exact_board_abstraction();
+    std::shared_ptr<const BoardAbstraction> board_abstraction = make_exact_board_abstraction();
     // ---------------------------------------------------------------------
     // All-in handling
     // ---------------------------------------------------------------------
     // If true, an all-in call before the river becomes a single terminal node.
     // Its EV must be computed by a terminal/all-in evaluator over hand pairs.
     //
-    // Cannot be true at the same time as expand_all_in_runouts.
+    // Is not used if terminal_mode = TerminalMode::RecordComputed
     bool collapse_all_in_runouts_to_ev = true;
-
-
+    // TODO: Add TerminalMode::RecordComputed support to CPU CFR.
+    TerminalMode terminal_mode = TerminalMode::RecordComputed;
     // ---------------------------------------------------------------------
     // Validation
     // ---------------------------------------------------------------------
@@ -196,7 +196,7 @@ struct HoldemSubgameConfig {
         return state;
     }
 
-    Player first_player_to_act_after_street_transition() const {
+    [[nodiscard]] Player first_player_to_act_after_street_transition() const {
         switch (first_to_act_rule) {
             case FirstToActRule::OopActsFirst:
                 return oop_player;
@@ -208,6 +208,19 @@ struct HoldemSubgameConfig {
         throw std::logic_error(
             "Invalid FirstToActRule in first_player_to_act_after_street_transition."
         );
+    }
+
+    [[nodiscard]] std::size_t memoryEstimate() const {
+        constexpr std::size_t minimum_game_capacity = 3400;
+        const std::size_t hand_pair_size = 100 * p0_range.hands_with_positive_weight().size() * p0_range.hands_with_positive_weight().size();
+        std::size_t base_game_size = minimum_game_capacity + hand_pair_size;
+        if (board.is_turn()) {
+            return base_game_size * 430;
+        }
+        if (board.is_flop()) {
+            return base_game_size * 430 * 300;
+        }
+        return base_game_size;
     }
 };
 

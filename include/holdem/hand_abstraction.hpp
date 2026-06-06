@@ -52,15 +52,15 @@ public:
     //   public street
     //
     // It must not depend on the opponent's exact private hand.
-    virtual HandBucketId bucket_for(
+    [[nodiscard]] virtual HandBucketId bucket_for(
         Player player,
         const HoleCards& private_hand,
         const Board& board
     ) const = 0;
 
-    virtual HandBucketId bucket_for(
-        Player player,
-        HandId private_hand,
+    [[nodiscard]] virtual HandBucketId bucket_for(
+        const Player player,
+        const HandId private_hand,
         const Board& board
     ) const {
         return bucket_for(
@@ -69,7 +69,7 @@ public:
             board
         );
     }
-    virtual bool is_exact() const = 0;
+    [[nodiscard]] virtual bool is_exact() const = 0;
 };
 
 // -----------------------------------------------------------------------------
@@ -81,8 +81,8 @@ public:
 
 class ExactHandAbstraction final : public HandAbstraction {
 public:
-    HandBucketId bucket_for(
-        Player player,
+    [[nodiscard]] HandBucketId bucket_for(
+        const Player player,
         const HoleCards& private_hand,
         const Board& board
     ) const override {
@@ -102,7 +102,7 @@ public:
         return static_cast<HandBucketId>(make_hand(private_hand));
     }
 
-    bool is_exact() const override {
+    [[nodiscard]] bool is_exact() const override {
         return true;
     }
 };
@@ -120,7 +120,7 @@ public:
 
 class BucketedHandAbstraction : public HandAbstraction {
 public:
-    bool is_exact() const override {
+    [[nodiscard]] bool is_exact() const override {
         return false;
     }
 };
@@ -152,7 +152,7 @@ public:
 class RiverStrengthHandAbstraction final : public BucketedHandAbstraction {
 public:
     [[nodiscard]] HandBucketId bucket_for(
-        Player player,
+        const Player player,
         const HoleCards& private_hand,
         const Board& board
     ) const override {
@@ -198,7 +198,7 @@ public:
 class NullBucketedHandAbstraction final : public BucketedHandAbstraction {
 public:
     [[nodiscard]] HandBucketId bucket_for(
-        Player player,
+        const Player player,
         const HoleCards& private_hand,
         const Board& board
     ) const override {

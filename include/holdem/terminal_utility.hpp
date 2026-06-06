@@ -8,8 +8,8 @@
 #include <stdexcept>
 
 #include "all_in_equity_cache.hpp"
-#include "../../external/PokerHandEvaluator/cpp/include/phevaluator/phevaluator.h"
-#include "../../external/PokerHandEvaluator/cpp/include/phevaluator/rank.h"
+#include <phevaluator/phevaluator.h>
+#include <phevaluator/rank.h>
 
 namespace poker::holdem {
 
@@ -93,6 +93,7 @@ inline float showdown_terminal_utility_p0(
     const PublicState& state,
     const PrivateState& private_state
 ) {
+    state.board.validate();
     if (!state.board.is_river()) {
         throw std::invalid_argument(
             "Showdown terminal requires five-card board."
