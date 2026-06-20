@@ -32,6 +32,34 @@
 namespace poker {
 namespace {
 
+// Profiling Helper
+struct GpuStageTimer {
+    cudaEvent_t start = nullptr;
+    cudaEvent_t stop = nullptr;
+
+    GpuStageTimer() {
+        cudaEventCreate(&start);
+        cudaEventCreate(&stop);
+    }
+
+    ~GpuStageTimer() {
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
+    }
+
+    template <typename Fn>
+    float time_ms(Fn&& fn) {
+        cudaEventRecord(start);
+        fn();
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+
+        float ms = 0.0f;
+        cudaEventElapsedTime(&ms, start, stop);
+        return ms;
+    }
+};
+
 // -----------------------------------------------------------------------------
 // CUDA helpers
 // -----------------------------------------------------------------------------
@@ -899,13 +927,18 @@ void GpuCfrSolver::initialize_strategy() const {
 // Run API
 // -----------------------------------------------------------------------------
 
-void GpuCfrSolver::run_iterations(int iterations) {
+void GpuCfrSolver::run_iterations(int iterations, bool profiled = false) {
     if (iterations < 0) {
         throw std::invalid_argument("iterations must be nonnegative.");
     }
-
-    for (int i = 0; i < iterations; ++i) {
-        run_one_iteration();
+    if (profiled) {
+        for (int i = 0; i < iterations; ++i) {
+            run_one_iteration_profiled();
+        }
+    } else {
+        for (int i = 0; i < iterations; ++i) {
+            run_one_iteration();
+        }
     }
 }
 
@@ -915,10 +948,14 @@ void GpuCfrSolver::run_one_iteration() {
     const int chunk_size = gpu_.work.pair_chunk_size;
     for (int pair_start = 0; pair_start < total_pairs; pair_start += chunk_size) {
         const int active_pair_count =std::min(chunk_size, total_pairs - pair_start);
+        
+        clear_chunk_node_buffers(active_pair_count);
+        
         run_terminal_evaluation_pass_for_chunk(
             pair_start,
             active_pair_count
         );
+                
         run_backward_value_pass_for_chunk(
             pair_start,
             active_pair_count
@@ -948,7 +985,112 @@ void GpuCfrSolver::run_one_iteration() {
         );
     }
 }
+// profiled iteration
+void GpuCfrSolver::run_one_iteration_profiled() {
+    GpuStageTimer timer;
 
+    float clear_ms = 0.0f;
+    float clear_chunk_ms = 0.0f;
+    float terminal_kernel_ms = 0.0f;
+    float backward_ms = 0.0f;
+    float reach_ms = 0.0f;
+    float regret_delta_ms = 0.0f;
+    float avg_ms = 0.0f;
+    float apply_regret_ms = 0.0f;
+    float strategy_ms = 0.0f;
+
+    int chunks = 0;
+
+    clear_ms += timer.time_ms([&] {
+        clear_iteration_accumulators();
+    });
+
+    const int total_pairs = gpu_.hand_data.hand_pair_count;
+    const int chunk_size = gpu_.work.pair_chunk_size;
+
+    for (int pair_start = 0; pair_start < total_pairs; pair_start += chunk_size) {
+        const int active_pair_count =
+            std::min(chunk_size, total_pairs - pair_start);
+
+        ++chunks;
+        clear_chunk_ms += timer.time_ms([&] {
+            clear_chunk_node_buffers(active_pair_count);
+        });
+
+        terminal_kernel_ms += timer.time_ms([&] {
+            run_terminal_evaluation_pass_for_chunk_without_clear(
+                pair_start,
+                active_pair_count
+            );
+        });
+        
+        backward_ms += timer.time_ms([&] {
+            run_backward_value_pass_for_chunk(
+                pair_start,
+                active_pair_count
+            );
+        });
+
+        reach_ms += timer.time_ms([&] {
+            run_reach_pass_for_chunk(
+                pair_start,
+                active_pair_count
+            );
+        });
+
+        regret_delta_ms += timer.time_ms([&] {
+            accumulate_regret_deltas_for_chunk(
+                pair_start,
+                active_pair_count
+            );
+        });
+    }
+
+    avg_ms += timer.time_ms([&] {
+        run_average_strategy_accumulation_pass();
+    });
+
+    apply_regret_ms += timer.time_ms([&] {
+        apply_regret_deltas();
+    });
+
+    strategy_ms += timer.time_ms([&] {
+        run_strategy_update_pass();
+    });
+
+    ++stats_.iterations_run;
+
+    const float total_ms =
+        clear_ms +
+        clear_chunk_ms +
+        terminal_kernel_ms +
+        backward_ms +
+        reach_ms +
+        regret_delta_ms +
+        avg_ms +
+        apply_regret_ms +
+        strategy_ms;
+
+    std::cerr
+        << "\n[gpu cfr profile] iteration=" << stats_.iterations_run
+        << " chunks=" << chunks
+        << " pair_chunk_size=" << chunk_size
+        << " total_ms=" << total_ms
+        << "\n"
+        << "  clear_iteration_accumulators: " << clear_ms << " ms\n"
+        << "  chunk_clear_total:          " << clear_chunk_ms << " ms\n"
+        << "  terminal_kernel_total:          " << terminal_kernel_ms
+        << " ms, per_chunk=" << terminal_kernel_ms / std::max(1, chunks) << " ms\n"
+        << "  backward_total:               " << backward_ms
+        << " ms, per_chunk=" << backward_ms / std::max(1, chunks) << " ms\n"
+        << "  reach_total:                  " << reach_ms
+        << " ms, per_chunk=" << reach_ms / std::max(1, chunks) << " ms\n"
+        << "  regret_delta_total:           " << regret_delta_ms
+        << " ms, per_chunk=" << regret_delta_ms / std::max(1, chunks) << " ms\n"
+        << "  average_strategy:             " << avg_ms << " ms\n"
+        << "  apply_regret_deltas:          " << apply_regret_ms << " ms\n"
+        << "  strategy_update:              " << strategy_ms << " ms\n";
+}
 // -----------------------------------------------------------------------------
 // Iteration stages
 // -----------------------------------------------------------------------------
