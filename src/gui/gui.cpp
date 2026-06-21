@@ -489,7 +489,7 @@ class Wizard : public Fl_Double_Window {
         for (int done = 0; done < total;) {
             const int step = std::min<int>(chunk, total - done);
 
-            solver.run_iterations(step);
+            solver.run_iterations(step, true);
 
             done += step;
             m_pg5->setIteration(done, total);

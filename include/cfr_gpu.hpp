@@ -6,6 +6,38 @@
 #include <vector>
 
 namespace poker {
+    // Packed showdown-result cache
+    // Each showdown result uses 2 bits:
+    //   0 = P0 loses
+    //   1 = tie
+    //   2 = P0 wins
+    //   3 = invalid / impossible board-hand collision / unused
+
+    // Packed into uint32_t words:
+    //   16 results per word
+
+    // Logical uncompressed index:
+    //   result_index = board_index * hand_pair_count + pair_id
+
+    // Packed index:
+    //   word_index = result_index >> 4
+    //   slot       = result_index & 15
+    //   shift      = slot << 1
+    //
+    enum class PackedShowdownResult : std::uint8_t {
+        P0Loses = 0,
+        Tie     = 1,
+        P0Wins  = 2,
+        Invalid = 3
+    };
+    constexpr int kShowdownResultBits = 2;
+    constexpr int kShowdownResultsPerWord = 16;
+    // Current BoardIndex space used by make_board_index():
+    //   0                  = starting board
+    //   1..52              = one-card extension
+    //   53..53 + 1326 - 1  = two-card extension
+    // This is a raw index-space size, not the number of legal boards.
+    constexpr int kBoardIndexCount = 1 + kNumCards + kNumHands;
 
 // -----------------------------------------------------------------------------
 // GPU CFR configuration / stats
@@ -18,7 +50,8 @@ enum class TerminalMode : int {
     ValuePrecomputed = 0,
     // Terminal values are computed during CFR from board, terminal type,
     // hand domains, and hand-pair table.
-    // Instead, takes [total_nodes] * sizeOf(TerminalRecord) memory
+    // Instead, takes [total_nodes] * sizeOf(TerminalRecord) bytes of memory,
+    // along with [kNumCards+kNumHands+1] * [hand_pairs] / [4 trits/byte] bytes of memory of cache
     RecordComputed = 1,
     // Debug value to create both terminal_values and TerminalRecords.
     DebugComputed = 2,
@@ -53,6 +86,7 @@ struct GpuCfrStats {
     std::size_t terminal_data_bytes = 0;
     std::size_t cfr_state_bytes = 0;
     std::size_t work_buffer_bytes = 0;
+    std::size_t showdown_result_cache_bytes = 0;
 };
 
 // -----------------------------------------------------------------------------
@@ -188,8 +222,8 @@ struct FlatTerminalData {
     std::vector<int> terminal_nodes;
     std::vector<int> terminal_index_by_node;
     // DeviceComputed mode:
-    std::vector<int> terminal_type;
-    std::vector<unsigned char> terminal_board_cards; // terminal_count * 5
+    std::vector<TerminalType> terminal_type;
+    std::vector<BoardIndex> board_index;
     std::vector<int> pot;
     std::vector<int> p0_committed;
     // HostPrecomputed mode only:
@@ -295,7 +329,6 @@ struct DevicePublicGameData {
     // ---------------------------------------------------------------------
 
     std::vector<DevicePublicLevelEdges> level_edges;
-
     DevicePublicActionEdges action_edges;
 };
 
@@ -335,13 +368,28 @@ struct DeviceTerminalData {
     int* d_terminal_index_by_node = nullptr;
 
     // DeviceComputed mode:
-    int* d_terminal_type = nullptr;
-    unsigned char* d_terminal_board_cards = nullptr;
+    TerminalType* d_terminal_type = nullptr;
+    BoardIndex* d_board_index = nullptr;
     int* d_pot = nullptr;
     int* d_p0_committed = nullptr;
 
     // HostPrecomputed mode:
     float* d_terminal_value_p0 = nullptr;
+};
+
+// This cache is independent of terminal node count.
+// It answers:
+// given (board_index, pair_id), did P0 win, lose, or tie?
+// It does NOT store chip utility. Pot and committed values still come from DeviceTerminalData.
+struct DeviceShowdownResultCache {
+    int board_count = kBoardIndexCount;
+    int start_board_size = 0;
+    unsigned char* d_start_board_cards = nullptr;
+    int hand_pair_count = 0;
+    std::size_t result_count = 0;
+    std::size_t word_count = 0;
+    // 2-bit packed results
+    std::uint32_t* d_words = nullptr;
 };
 
 // -----------------------------------------------------------------------------
@@ -443,6 +491,8 @@ struct GpuPublicState {
     DeviceHandData hand_data;
     DeviceTerminalData terminal_data;
 
+    DeviceShowdownResultCache showdown_cache;
+
     DevicePublicCfrState cfr;
     DevicePublicWorkBuffers work;
 
@@ -476,6 +526,25 @@ public:
     [[nodiscard]] std::vector<float> debug_state_bucket_value_p0() const;
     [[nodiscard]] std::vector<float> debug_node_pair_value_p0() const;
     void debug_dump_action_value_launch_inputs() const;
+    static std::size_t showdown_result_count(
+        const int board_count,
+        const int hand_pair_count
+    ) {
+        return static_cast<std::size_t>(board_count) * static_cast<std::size_t>(hand_pair_count);
+    }
+    static std::size_t packed_showdown_word_count(
+        const int board_count,
+        const int hand_pair_count
+    ) {
+        const std::size_t results = showdown_result_count(board_count, hand_pair_count);
+        return (results + kShowdownResultsPerWord - 1) / kShowdownResultsPerWord;
+    }
+    static std::size_t packed_showdown_byte_count(
+        const int board_count,
+        const int hand_pair_count
+    ) {
+        return packed_showdown_word_count(board_count, hand_pair_count) * sizeof(std::uint32_t);
+    }
 
     GpuCfrSolver(const GpuCfrSolver&) = delete;
     GpuCfrSolver& operator=(const GpuCfrSolver&) = delete;
@@ -491,8 +560,9 @@ public:
         std::vector<float> terminal_value_p0
     );
 
-    void run_iterations(int iterations);
+    void run_iterations(int iterations, bool profiled = false);
     void run_one_iteration();
+    void run_one_iteration_profiled();
 
     // Flat tensor strategy:
     //
@@ -512,7 +582,6 @@ public:
     [[nodiscard]] const FlatHandData& flat_hand_data() const;
 
     [[nodiscard]] const FlatTerminalData& flat_terminal_data() const;
-
 private:
     const Game& game_;
     GpuCfrConfig config_;
@@ -534,6 +603,9 @@ private:
     void upload_static_game();
     void upload_hand_data();
     void upload_terminal_data();
+
+    void allocate_showdown_result_cache();
+    void compute_showdown_result_cache() const;
 
     void allocate_cfr_state();
     void allocate_work_buffers();
@@ -579,31 +651,5 @@ private:
         std::size_t count
     ) const;
 };
-
-// -----------------------------------------------------------------------------
-// Device-side index formula documentation
-// -----------------------------------------------------------------------------
-//
-// Kernels should use this exact indexing convention:
-//
-//   tensor_index =
-//       d_action_state_tensor_offset[state]
-//     + bucket * d_action_state_action_count[state]
-//     + local_action
-//
-//   state_bucket_index =
-//       d_action_state_bucket_offset[state]
-//     + bucket
-//
-// In exact-domain mode:
-//
-//   bucket == domain-local hand index
-//
-// For a legal hand pair:
-//
-//   p0_bucket = d_p0_bucket_by_hand_index[d_p0_pair_index[pair]]
-//   p1_bucket = d_p1_bucket_by_hand_index[d_p1_pair_index[pair]]
-//
-// This replaces the old q-index layout entirely.
 
 } // namespace poker

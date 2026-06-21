@@ -38,302 +38,556 @@
 
 namespace poker {
 namespace {
+    constexpr int kPlayerP0 = 0;
+    constexpr int kPlayerP1 = 1;
 
-constexpr int kPlayerP0 = 0;
-constexpr int kPlayerP1 = 1;
-
-extern "C" __device__ int cuda_evaluate_7cards(
-    int a,
-    int b,
-    int c,
-    int d,
-    int e,
-    int f,
-    int g,
-    short* binaries_by_id,
-    short* suitbit_by_id,
-    short* flush,
-    short* noflush7,
-    unsigned char* suits,
-    int* dp
-);
+    extern "C" __device__ int cuda_evaluate_7cards(
+        int a,
+        int b,
+        int c,
+        int d,
+        int e,
+        int f,
+        int g,
+        short* binaries_by_id,
+        short* suitbit_by_id,
+        short* flush,
+        short* noflush7,
+        unsigned char* suits,
+        int* dp
+    );
 
 
-__global__ void fill_float_kernel(
-    float* values,
-    float value,
-    std::size_t count
-) {
-    const std::size_t i =
-        static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    __global__ void fill_float_kernel(
+        float* values,
+        float value,
+        std::size_t count
+    ) {
+        const std::size_t i =
+            static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
 
-    if (i < count) {
-        values[i] = value;
-    }
-}
-
-__global__ void copy_float_kernel(
-    const float* src,
-    float* dst,
-    std::size_t count
-) {
-    const std::size_t i =
-        static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-
-    if (i < count) {
-        dst[i] = src[i];
-    }
-}
-
-__global__ void initialize_public_uniform_strategy_kernel(
-    const int* bucket_count,
-    const int* action_count,
-    const std::uint64_t* tensor_offset,
-    float* sigma,
-    float* sigma_init,
-    int num_action_states
-) {
-    const int state = blockIdx.x;
-
-    if (state >= num_action_states) {
-        return;
-    }
-
-    const int buckets = bucket_count[state];
-    const int actions = action_count[state];
-
-    if (buckets <= 0 || actions <= 0) {
-        return;
-    }
-
-    const float uniform = 1.0f / static_cast<float>(actions);
-
-    for (int bucket = threadIdx.x; bucket < buckets; bucket += blockDim.x) {
-        const std::uint64_t base =
-            tensor_offset[state] +
-            static_cast<std::uint64_t>(bucket) *
-                static_cast<std::uint64_t>(actions);
-
-        for (int a = 0; a < actions; ++a) {
-            sigma[base + static_cast<std::uint64_t>(a)] = uniform;
-            sigma_init[base + static_cast<std::uint64_t>(a)] = uniform;
+        if (i < count) {
+            values[i] = value;
         }
     }
-}
 
-__global__ void load_precomputed_terminal_pair_values_kernel(
-    int num_nodes,
-    int hand_pair_count,
-    const int* terminal_index_by_node,
-    const float* terminal_value_p0,
-    float* node_pair_value_p0
-) {
-    const std::size_t total =
-        static_cast<std::size_t>(num_nodes) *
-        static_cast<std::size_t>(hand_pair_count);
+    __global__ void copy_float_kernel(
+        const float* src,
+        float* dst,
+        std::size_t count
+    ) {
+        const std::size_t i =
+            static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
 
-    const std::size_t i =
-        static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-
-    if (i >= total) {
-        return;
-    }
-
-    const int node =
-        static_cast<int>(i / static_cast<std::size_t>(hand_pair_count));
-
-    const int pair =
-        static_cast<int>(i % static_cast<std::size_t>(hand_pair_count));
-
-    const int terminal_index = terminal_index_by_node[node];
-
-    if (terminal_index < 0) {
-        node_pair_value_p0[i] = 0.0f;
-        return;
-    }
-
-    const std::size_t terminal_idx =
-        static_cast<std::size_t>(terminal_index) *
-            static_cast<std::size_t>(hand_pair_count) +
-        static_cast<std::size_t>(pair);
-
-    node_pair_value_p0[i] = terminal_value_p0[terminal_idx];
-}
-
-__global__ void public_accumulate_average_strategy_kernel(
-    const int* bucket_count,
-    const int* action_count,
-    const std::uint64_t* tensor_offset,
-    const std::uint64_t* bucket_offset,
-
-    const float* state_bucket_own_reach,
-    const float* sigma,
-
-    float* strategy_sum,
-    float* strategy_weight_sum,
-
-    int num_action_states,
-    float iteration_weight
-) {
-    const int state = blockIdx.x;
-
-    if (state >= num_action_states) {
-        return;
-    }
-
-    const int buckets = bucket_count[state];
-    const int actions = action_count[state];
-
-    for (int bucket = threadIdx.x; bucket < buckets; bucket += blockDim.x) {
-        const std::uint64_t sb =
-            bucket_offset[state] + static_cast<std::uint64_t>(bucket);
-
-        const float weight =
-            state_bucket_own_reach[sb] * iteration_weight;
-
-        strategy_weight_sum[sb] += weight;
-
-        const std::uint64_t base =
-            tensor_offset[state] +
-            static_cast<std::uint64_t>(bucket) *
-                static_cast<std::uint64_t>(actions);
-
-        for (int a = 0; a < actions; ++a) {
-            const std::uint64_t idx = base + static_cast<std::uint64_t>(a);
-            strategy_sum[idx] += weight * sigma[idx];
+        if (i < count) {
+            dst[i] = src[i];
         }
     }
-}
 
-__global__ void public_normalize_average_strategy_kernel(
-    const int* bucket_count,
-    const int* action_count,
-    const std::uint64_t* tensor_offset,
-    const std::uint64_t* bucket_offset,
+    __global__ void initialize_public_uniform_strategy_kernel(
+        const int* bucket_count,
+        const int* action_count,
+        const std::uint64_t* tensor_offset,
+        float* sigma,
+        float* sigma_init,
+        int num_action_states
+    ) {
+        const int state = blockIdx.x;
 
-    const float* strategy_sum,
-    const float* strategy_weight_sum,
+        if (state >= num_action_states) {
+            return;
+        }
 
-    float* avg_strategy,
+        const int buckets = bucket_count[state];
+        const int actions = action_count[state];
 
-    int num_action_states
-) {
-    const int state = blockIdx.x;
+        if (buckets <= 0 || actions <= 0) {
+            return;
+        }
 
-    if (state >= num_action_states) {
-        return;
-    }
-
-    const int buckets = bucket_count[state];
-    const int actions = action_count[state];
-
-    for (int bucket = threadIdx.x; bucket < buckets; bucket += blockDim.x) {
-        const std::uint64_t sb =
-            bucket_offset[state] + static_cast<std::uint64_t>(bucket);
-
-        const float denom = strategy_weight_sum[sb];
         const float uniform = 1.0f / static_cast<float>(actions);
 
-        const std::uint64_t base =
-            tensor_offset[state] +
-            static_cast<std::uint64_t>(bucket) *
-                static_cast<std::uint64_t>(actions);
+        for (int bucket = threadIdx.x; bucket < buckets; bucket += blockDim.x) {
+            const std::uint64_t base =
+                tensor_offset[state] +
+                static_cast<std::uint64_t>(bucket) *
+                    static_cast<std::uint64_t>(actions);
 
-        for (int a = 0; a < actions; ++a) {
-            const std::uint64_t idx = base + static_cast<std::uint64_t>(a);
-
-            avg_strategy[idx] =
-                denom > 0.0f
-                    ? strategy_sum[idx] / denom
-                    : uniform;
-        }
-    }
-}
-
-__global__ void public_regret_matching_kernel(
-    const int* bucket_count,
-    const int* action_count,
-    const std::uint64_t* tensor_offset,
-
-    const float* regret_sum,
-    float* sigma,
-    const float* sigma_init,
-
-    int num_action_states
-) {
-    const int state = blockIdx.x;
-
-    if (state >= num_action_states) {
-        return;
-    }
-
-    const int buckets = bucket_count[state];
-    const int actions = action_count[state];
-
-    for (int bucket = threadIdx.x; bucket < buckets; bucket += blockDim.x) {
-        const std::uint64_t base =
-            tensor_offset[state] +
-            static_cast<std::uint64_t>(bucket) *
-                static_cast<std::uint64_t>(actions);
-
-        float positive_sum = 0.0f;
-
-        for (int a = 0; a < actions; ++a) {
-            const float r = regret_sum[base + static_cast<std::uint64_t>(a)];
-
-            if (r > 0.0f) {
-                positive_sum += r;
+            for (int a = 0; a < actions; ++a) {
+                sigma[base + static_cast<std::uint64_t>(a)] = uniform;
+                sigma_init[base + static_cast<std::uint64_t>(a)] = uniform;
             }
         }
+    }
 
-        if (positive_sum > 0.0f) {
+    __global__ void load_precomputed_terminal_pair_values_kernel(
+        int num_nodes,
+        int hand_pair_count,
+        const int* terminal_index_by_node,
+        const float* terminal_value_p0,
+        float* node_pair_value_p0
+    ) {
+        const std::size_t total =
+            static_cast<std::size_t>(num_nodes) *
+            static_cast<std::size_t>(hand_pair_count);
+
+        const std::size_t i =
+            static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+
+        if (i >= total) {
+            return;
+        }
+
+        const int node =
+            static_cast<int>(i / static_cast<std::size_t>(hand_pair_count));
+
+        const int pair =
+            static_cast<int>(i % static_cast<std::size_t>(hand_pair_count));
+
+        const int terminal_index = terminal_index_by_node[node];
+
+        if (terminal_index < 0) {
+            node_pair_value_p0[i] = 0.0f;
+            return;
+        }
+
+        const std::size_t terminal_idx =
+            static_cast<std::size_t>(terminal_index) *
+                static_cast<std::size_t>(hand_pair_count) +
+            static_cast<std::size_t>(pair);
+
+        node_pair_value_p0[i] = terminal_value_p0[terminal_idx];
+    }
+
+    __global__ void public_accumulate_average_strategy_kernel(
+        const int* bucket_count,
+        const int* action_count,
+        const std::uint64_t* tensor_offset,
+        const std::uint64_t* bucket_offset,
+
+        const float* state_bucket_own_reach,
+        const float* sigma,
+
+        float* strategy_sum,
+        float* strategy_weight_sum,
+
+        int num_action_states,
+        float iteration_weight
+    ) {
+        const int state = blockIdx.x;
+
+        if (state >= num_action_states) {
+            return;
+        }
+
+        const int buckets = bucket_count[state];
+        const int actions = action_count[state];
+
+        for (int bucket = threadIdx.x; bucket < buckets; bucket += blockDim.x) {
+            const std::uint64_t sb =
+                bucket_offset[state] + static_cast<std::uint64_t>(bucket);
+
+            const float weight =
+                state_bucket_own_reach[sb] * iteration_weight;
+
+            strategy_weight_sum[sb] += weight;
+
+            const std::uint64_t base =
+                tensor_offset[state] +
+                static_cast<std::uint64_t>(bucket) *
+                    static_cast<std::uint64_t>(actions);
+
             for (int a = 0; a < actions; ++a) {
                 const std::uint64_t idx = base + static_cast<std::uint64_t>(a);
-                const float r = regret_sum[idx];
-                sigma[idx] = r > 0.0f ? r / positive_sum : 0.0f;
-            }
-        } else {
-            for (int a = 0; a < actions; ++a) {
-                const std::uint64_t idx = base + static_cast<std::uint64_t>(a);
-                sigma[idx] = sigma_init[idx];
+                strategy_sum[idx] += weight * sigma[idx];
             }
         }
     }
-}
-__device__ float terminal_win_utility(
-int pot,
-int p0_committed
+
+    __global__ void public_normalize_average_strategy_kernel(
+        const int* bucket_count,
+        const int* action_count,
+        const std::uint64_t* tensor_offset,
+        const std::uint64_t* bucket_offset,
+
+        const float* strategy_sum,
+        const float* strategy_weight_sum,
+
+        float* avg_strategy,
+
+        int num_action_states
+    ) {
+        const int state = blockIdx.x;
+
+        if (state >= num_action_states) {
+            return;
+        }
+
+        const int buckets = bucket_count[state];
+        const int actions = action_count[state];
+
+        for (int bucket = threadIdx.x; bucket < buckets; bucket += blockDim.x) {
+            const std::uint64_t sb =
+                bucket_offset[state] + static_cast<std::uint64_t>(bucket);
+
+            const float denom = strategy_weight_sum[sb];
+            const float uniform = 1.0f / static_cast<float>(actions);
+
+            const std::uint64_t base =
+                tensor_offset[state] +
+                static_cast<std::uint64_t>(bucket) *
+                    static_cast<std::uint64_t>(actions);
+
+            for (int a = 0; a < actions; ++a) {
+                const std::uint64_t idx = base + static_cast<std::uint64_t>(a);
+
+                avg_strategy[idx] =
+                    denom > 0.0f
+                        ? strategy_sum[idx] / denom
+                        : uniform;
+            }
+        }
+    }
+
+    __global__ void public_regret_matching_kernel(
+        const int* bucket_count,
+        const int* action_count,
+        const std::uint64_t* tensor_offset,
+
+        const float* regret_sum,
+        float* sigma,
+        const float* sigma_init,
+
+        int num_action_states
+    ) {
+        const int state = blockIdx.x;
+
+        if (state >= num_action_states) {
+            return;
+        }
+
+        const int buckets = bucket_count[state];
+        const int actions = action_count[state];
+
+        for (int bucket = threadIdx.x; bucket < buckets; bucket += blockDim.x) {
+            const std::uint64_t base = tensor_offset[state] + static_cast<std::uint64_t>(bucket) * static_cast<std::uint64_t>(actions);
+
+            float positive_sum = 0.0f;
+
+            for (int a = 0; a < actions; ++a) {
+                const float r = regret_sum[base + static_cast<std::uint64_t>(a)];
+
+                if (r > 0.0f) {
+                    positive_sum += r;
+                }
+            }
+
+            if (positive_sum > 0.0f) {
+                for (int a = 0; a < actions; ++a) {
+                    const std::uint64_t idx = base + static_cast<std::uint64_t>(a);
+                    const float r = regret_sum[idx];
+                    sigma[idx] = r > 0.0f ? r / positive_sum : 0.0f;
+                }
+            } else {
+                for (int a = 0; a < actions; ++a) {
+                    const std::uint64_t idx = base + static_cast<std::uint64_t>(a);
+                    sigma[idx] = sigma_init[idx];
+                }
+            }
+        }
+    }
+
+    constexpr unsigned char kShowdownP0Loses = 0;
+    constexpr unsigned char kShowdownTie     = 1;
+    constexpr unsigned char kShowdownP0Wins  = 2;
+    constexpr unsigned char kShowdownInvalid = 3;
+    constexpr int kShowdownResultsPerWordDevice = 16;
+
+__device__ unsigned int unpack_showdown_result_2bit(
+    const std::uint32_t* __restrict__ words,
+    std::size_t result_index
 ) {
-    return static_cast<float>(pot - p0_committed);
+    const std::size_t word_index = result_index >> 4; // / 16
+    const unsigned int slot = static_cast<unsigned int>(result_index & 15u);
+
+    const unsigned int shift = slot << 1; // slot * 2
+
+    return (words[word_index] >> shift) & 0x3u;
 }
 
-__device__ float terminal_loss_utility(
-    int p0_committed
-) {
-    return -static_cast<float>(p0_committed);
-}
-
-__device__ float terminal_tie_utility(
+__device__ float utility_from_showdown_code_p0(
+    unsigned int code,
     int pot,
     int p0_committed
 ) {
-    return 0.5f * static_cast<float>(pot) -
-           static_cast<float>(p0_committed);
-}
-__device__ unsigned long long card_bit_device(int card) {
-    return 1ULL << static_cast<unsigned long long>(card);
-}
+    if (code == kShowdownP0Wins) {
+        return static_cast<float>(pot - p0_committed);
+    }
+    if (code == kShowdownP0Loses) {
+        return static_cast<float>(-p0_committed);
+    }
+    if (code == kShowdownTie) {
+        return 0.5f * static_cast<float>(pot) - static_cast<float>(p0_committed);
+    }
 
-__device__ bool card_is_dead_device(
-    unsigned long long dead_mask,
-    int card
+    // Invalid means board/hand collision, non-river board, or unused row.
+    // Ideally this should never be reached for a legal terminal/pair.
+    return 0.0f;
+}
+__device__ __forceinline__ int make_hand_id_from_cards_device(
+    int a,
+    int b
 ) {
-    return (dead_mask & card_bit_device(card)) != 0ULL;
+    if (b < a) {
+        const int tmp = a;
+        a = b;
+        b = tmp;
+    }
+    const int before = a * 51 - (a * (a - 1)) / 2;
+    return before + (b - a - 1);
 }
-__device__ float terminal_showdown_utility(
-    int pot,
-    int p0_committed,
 
+__device__ __forceinline__ int two_card_board_index_device(
+    int a,
+    int b
+) {
+    return 53 + make_hand_id_from_cards_device(a, b);
+}
+__device__ float terminal_utility_from_record_and_cache_p0(
+    const TerminalType terminal_type,
+    const int pot,
+    const int p0_committed,
+    const BoardIndex board_index,
+    const int global_pair_id,
+    const int showdown_hand_pair_count,
+    const std::uint32_t* __restrict__ showdown_words
+) {
+    if (terminal_type == TerminalType::P0_Fold) {
+        return static_cast<float>(-p0_committed);
+    }
+    if (terminal_type == TerminalType::P1_Fold) {
+        return static_cast<float>(pot - p0_committed);
+    }
+    const auto showdown_pair_count = static_cast<std::size_t>(showdown_hand_pair_count);
+    const auto pair_id = static_cast<std::size_t>(global_pair_id);
+    if (terminal_type == TerminalType::Showdown || board_index > kNumCards) {
+        const std::size_t result_index = static_cast<std::size_t>(board_index) * showdown_pair_count + pair_id;
+        const unsigned int code = unpack_showdown_result_2bit(showdown_words,result_index);
+        return utility_from_showdown_code_p0(code, pot, p0_committed);
+    }
+    if (terminal_type == TerminalType::AllIn) {
+        float running_utility = 0.0f;
+        int valid_boards = 0;
+        // All-in on starting board.
+        // Loops all possible turn+river BoardIndex values.
+        if (board_index == 0) {
+            #pragma unroll
+            for (std::size_t final_board_index{1}; final_board_index < kBoardIndexCount; ++final_board_index) {
+                const std::size_t result_index = final_board_index * showdown_pair_count + pair_id;
+                const unsigned int code = unpack_showdown_result_2bit(showdown_words, result_index);
+                if (code == kShowdownInvalid) {
+                    continue;
+                }
+                running_utility += utility_from_showdown_code_p0(
+                    code,
+                    pot,
+                    p0_committed
+                );
+                ++valid_boards;
+            }
+        }
+        // All-in after exactly one public card has been added since start.
+        // Can't go out of bounds due to
+        else if (board_index <= kNumCards) {
+            const int known_extra_card = static_cast<int>(board_index) - 1;
+            #pragma unroll
+            for (int river_card{0}; river_card < kNumCards; ++river_card) {
+                if (river_card == known_extra_card) {
+                    continue;
+                }
+                const int final_board_index = two_card_board_index_device(known_extra_card, river_card);
+                const std::size_t result_index = static_cast<std::size_t>(final_board_index) * showdown_pair_count + pair_id;
+                const unsigned int code = unpack_showdown_result_2bit(showdown_words,result_index);
+                if (code == kShowdownInvalid) {
+                    continue;
+                }
+                running_utility += utility_from_showdown_code_p0(
+                    code,
+                    pot,
+                    p0_committed
+                );
+                ++valid_boards;
+            }
+        }
+        if (valid_boards == 0) { return 0.0f;}
+        return running_utility / static_cast<float>(valid_boards);
+    }
+    return 0.0f;
+}
+
+__device__ bool seven_card_inputs_are_legal(
+    int p0a,
+    int p0b,
+    int p1a,
+    int p1b,
+    int b0,
+    int b1,
+    int b2,
+    int b3,
+    int b4
+) {
+    const int cards[9] = {
+        p0a, p0b, p1a, p1b, b0, b1, b2, b3, b4
+    };
+    #pragma unroll
+    for (int i = 0; i < 9; ++i) {
+        if (cards[i] < 0 || cards[i] >= kNumCards) {
+            return false;
+        }
+        #pragma unroll
+        for (int j = i + 1; j < 9; ++j) {
+            if (cards[i] == cards[j]) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+__device__ void hand_id_to_cards_device(
+    int hand_id,
+    int& a,
+    int& b
+) {
+    // Matches your host HandId ordering:
+    //
+    // for first = 0..51:
+    //   for second = first + 1..51:
+    //      id++
+    //
+    // This is only used in precompute, so a tiny loop is acceptable.
+    int id = 0;
+    for (int first = 0; first < kNumCards; ++first) {
+        const int count_for_first = kNumCards - first - 1;
+        if (hand_id < id + count_for_first) {
+            a = first;
+            b = first + 1 + (hand_id - id);
+            return;
+        }
+        id += count_for_first;
+    }
+    a = kNumCards;
+    b = kNumCards;
+}
+__device__ bool board_has_duplicate_or_missing_river(
+    int b0,
+    int b1,
+    int b2,
+    int b3,
+    int b4
+) {
+    if (b0 < 0 || b0 >= kNumCards ||
+        b1 < 0 || b1 >= kNumCards ||
+        b2 < 0 || b2 >= kNumCards ||
+        b3 < 0 || b3 >= kNumCards ||
+        b4 < 0 || b4 >= kNumCards) {
+        return true;
+        }
+
+    return b0 == b1 || b0 == b2 || b0 == b3 || b0 == b4 ||
+           b1 == b2 || b1 == b3 || b1 == b4 ||
+           b2 == b3 || b2 == b4 ||
+           b3 == b4;
+}
+__device__ bool board_index_to_river_cards_device(
+    int board_index,
+    int start_board_size,
+    const unsigned char* __restrict__ start_board_cards,
+
+    int& b0,
+    int& b1,
+    int& b2,
+    int& b3,
+    int& b4
+) {
+    b0 = kNumCards;
+    b1 = kNumCards;
+    b2 = kNumCards;
+    b3 = kNumCards;
+    b4 = kNumCards;
+
+    int board[5] = {
+        kNumCards,
+        kNumCards,
+        kNumCards,
+        kNumCards,
+        kNumCards
+    };
+
+    for (int i = 0; i < start_board_size; ++i) {
+        const int card = start_board_cards[i];
+
+        if (card < 0 || card >= kNumCards) {
+            return false;
+        }
+
+        board[i] = card;
+    }
+
+    int size = start_board_size;
+
+    if (board_index == 0) {
+        // No extension.
+    } else if (board_index < 53) {
+        // One-card extension.
+        if (size >= 5) {
+            return false;
+        }
+
+        board[size] = board_index - 1;
+        ++size;
+    } else {
+        // Two-card extension.
+        if (size + 2 > 5) {
+            return false;
+        }
+
+        int a = kNumCards;
+        int b = kNumCards;
+
+        hand_id_to_cards_device(
+            board_index - 53,
+            a,
+            b
+        );
+
+        if (a >= kNumCards || b >= kNumCards) {
+            return false;
+        }
+
+        board[size] = a;
+        board[size + 1] = b;
+        size += 2;
+    }
+
+    if (size != 5) {
+        return false;
+    }
+
+    b0 = board[0];
+    b1 = board[1];
+    b2 = board[2];
+    b3 = board[3];
+    b4 = board[4];
+
+    return !board_has_duplicate_or_missing_river(
+        b0,
+        b1,
+        b2,
+        b3,
+        b4
+    );
+}
+__device__ unsigned char compute_showdown_result_code(
     int p0a,
     int p0b,
     int p1a,
@@ -352,6 +606,9 @@ __device__ float terminal_showdown_utility(
     unsigned char* d_suits,
     int* d_dp
 ) {
+    if (!seven_card_inputs_are_legal(p0a,p0b,p1a,p1b,b0,b1,b2,b3,b4)) {
+        return kShowdownInvalid;
+    }
     const int p0_rank = cuda_evaluate_7cards(
         p0a,
         p0b,
@@ -382,157 +639,78 @@ __device__ float terminal_showdown_utility(
         d_suits,
         d_dp
     );
+
     // Smaller rank is stronger.
     if (p0_rank < p1_rank) {
-        return terminal_win_utility(pot, p0_committed);
+        return kShowdownP0Wins;
     }
-
     if (p1_rank < p0_rank) {
-        return terminal_loss_utility(p0_committed);
+        return kShowdownP0Loses;
     }
-
-    return terminal_tie_utility(pot, p0_committed);
+    return kShowdownTie;
 }
-__device__ float terminal_all_in_runout_utility(
-    int pot,
-    int p0_committed,
-
-    int p0a,
-    int p0b,
-    int p1a,
-    int p1b,
-
-    int b0,
-    int b1,
-    int b2,
-    int b3,
-    int b4,
-
-    short* d_binaries_by_id,
-    short* d_suitbit_by_id,
-    short* d_flush,
-    short* d_noflush7,
-    unsigned char* d_suits,
-    int* d_dp
-) {
-    constexpr int kMissingCard = 52;
-    unsigned long long dead_mask = 0ULL;
-    dead_mask |= card_bit_device(p0a);
-    dead_mask |= card_bit_device(p0b);
-    dead_mask |= card_bit_device(p1a);
-    dead_mask |= card_bit_device(p1b);
-    dead_mask |= card_bit_device(b0);
-    dead_mask |= card_bit_device(b1);
-    dead_mask |= card_bit_device(b2);
-    const bool has_turn = b3 != kMissingCard;
-    const bool has_river = b4 != kMissingCard;
-    if (has_turn) {
-        dead_mask |= card_bit_device(b3);
-    }
-    if (has_river) {
-        dead_mask |= card_bit_device(b4);
-    }
-    // River board: direct showdown.
-    if (has_turn && has_river) {
-        return terminal_showdown_utility(
-            pot,
-            p0_committed,
-            p0a,
-            p0b,
-            p1a,
-            p1b,
-            b0,
-            b1,
-            b2,
-            b3,
-            b4,
-            d_binaries_by_id,
-            d_suitbit_by_id,
-            d_flush,
-            d_noflush7,
-            d_suits,
-            d_dp
-        );
-    }
-    float value_sum = 0.0f;
-    int runout_count = 0;
-    // Turn board: enumerate one river card.
-    if (has_turn && !has_river) {
-        for (int river = 0; river < 52; ++river) {
-            if (card_is_dead_device(dead_mask, river)) {
-                continue;
-            }
-            value_sum += terminal_showdown_utility(
-                pot,
-                p0_committed,
-                p0a,
-                p0b,
-                p1a,
-                p1b,
-                b0,
-                b1,
-                b2,
-                b3,
-                river,
-                d_binaries_by_id,
-                d_suitbit_by_id,
-                d_flush,
-                d_noflush7,
-                d_suits,
-                d_dp
-            );
-            ++runout_count;
-        }
-        return runout_count > 0 ? value_sum / static_cast<float>(runout_count) : 0.0f;
-    }
-    // Flop board: enumerate unordered turn-river combinations.
-    if (!has_turn && !has_river) {
-        for (int turn = 0; turn < 52; ++turn) {
-            if (card_is_dead_device(dead_mask, turn)) {
-                continue;
-            }
-            const unsigned long long dead_with_turn = dead_mask | card_bit_device(turn);
-            for (int river = turn + 1; river < 52; ++river) {
-                if (card_is_dead_device(dead_with_turn, river)) {
-                    continue;
-                }
-                value_sum += terminal_showdown_utility(
-                    pot,
-                    p0_committed,
-                    p0a,
-                    p0b,
-                    p1a,
-                    p1b,
-                    b0,
-                    b1,
-                    b2,
-                    turn,
-                    river,
-                    d_binaries_by_id,
-                    d_suitbit_by_id,
-                    d_flush,
-                    d_noflush7,
-                    d_suits,
-                    d_dp
-                );
-                ++runout_count;
-            }
-        }
-        return runout_count > 0 ? value_sum / static_cast<float>(runout_count): 0.0f;
-    }
-    return 0.0f;
-}
-__global__ void compute_terminal_pair_values_from_records_chunk_kernel(
-    int terminal_count,
-    int pair_start,
-    int active_pair_count,
-    int pair_chunk_size,
-
+__global__ void compute_terminal_pair_values_from_records_cache_chunk_kernel(
+    const int terminal_count,
+    const int pair_start,
+    const int active_pair_count,
+    const int pair_chunk_size,
+    const int total_hand_pair_count,
     const int* __restrict__ d_terminal_nodes,
-    const int* __restrict__ d_terminal_type,
+    const TerminalType* __restrict__ d_terminal_type,
     const int* __restrict__ d_terminal_pot,
     const int* __restrict__ d_terminal_p0_committed,
-    const unsigned char* __restrict__ d_terminal_board_cards,
+    const BoardIndex* __restrict__ d_terminal_board_index,
+
+    const int showdown_hand_pair_count,
+    const std::uint32_t* __restrict__ d_showdown_words,
+
+    float* __restrict__ d_node_pair_value_p0
+) {
+    const std::size_t linear = static_cast<std::size_t>(blockIdx.x) * static_cast<std::size_t>(blockDim.x) + static_cast<std::size_t>(threadIdx.x);
+    if (const std::size_t total = static_cast<std::size_t>(terminal_count) * static_cast<std::size_t>(active_pair_count); linear >= total) {
+        return;
+    }
+    const int terminal_index = static_cast<int>(linear / active_pair_count);
+    const int local_pair = static_cast<int>(linear % active_pair_count);
+    const int global_pair_id = pair_start + local_pair;
+
+    if (global_pair_id < 0 || global_pair_id >= total_hand_pair_count) {
+        return;
+    }
+
+    const int node_id = d_terminal_nodes[terminal_index];
+
+    const TerminalType terminal_type = d_terminal_type[terminal_index];
+
+    const int pot = d_terminal_pot[terminal_index];
+
+    const int p0_committed = d_terminal_p0_committed[terminal_index];
+
+    const BoardIndex board_index = d_terminal_board_index[terminal_index];
+
+    const float value =
+        terminal_utility_from_record_and_cache_p0(
+            terminal_type,
+            pot,
+            p0_committed,
+            board_index,
+            global_pair_id,
+            showdown_hand_pair_count,
+            d_showdown_words
+        );
+
+    d_node_pair_value_p0[
+        static_cast<std::size_t>(node_id) *
+        static_cast<std::size_t>(pair_chunk_size) +
+        static_cast<std::size_t>(local_pair)
+    ] = value;
+}
+__global__ void compute_packed_showdown_result_cache_kernel(
+    int board_count,
+    int hand_pair_count,
+
+    int start_board_size,
+    const unsigned char* __restrict__ start_board_cards,
 
     const int* __restrict__ d_p0_pair_index,
     const int* __restrict__ d_p1_pair_index,
@@ -549,83 +727,54 @@ __global__ void compute_terminal_pair_values_from_records_chunk_kernel(
     unsigned char* d_suits,
     int* d_dp,
 
-    float* __restrict__ d_node_pair_value_p0
+    std::uint32_t* __restrict__ d_showdown_words
 ) {
-    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    const int total = terminal_count * active_pair_count;
-    if (idx >= total) {
+    const std::size_t word_index = static_cast<std::size_t>(blockIdx.x) * static_cast<std::size_t>(blockDim.x) + static_cast<std::size_t>(threadIdx.x);
+    const std::size_t total_results =static_cast<std::size_t>(board_count) * static_cast<std::size_t>(hand_pair_count);
+    const std::size_t result_base = word_index * static_cast<std::size_t>(kShowdownResultsPerWordDevice);
+
+    if (result_base >= total_results) {
         return;
     }
-    const int terminal_index = idx / active_pair_count;
-    const int local_pair = idx - terminal_index * active_pair_count;
-    const int global_pair = pair_start + local_pair;
-    const int node_id = d_terminal_nodes[terminal_index];
-    const int type = d_terminal_type[terminal_index];
-    const int pot = d_terminal_pot[terminal_index];
-    const int p0_committed = d_terminal_p0_committed[terminal_index];
 
-    float value = 0.0f;
-
-    if (type == static_cast<int>(TerminalType::P0_Fold)) {
-        value = terminal_loss_utility(p0_committed);
-    } else if (type == static_cast<int>(TerminalType::P1_Fold)) {
-        value = terminal_win_utility(pot, p0_committed);
-    } else if (type == static_cast<int>(TerminalType::Showdown)) {
-        const int p0_i = d_p0_pair_index[global_pair];
-        const int p1_i = d_p1_pair_index[global_pair];
-        const int p0a = d_p0_hand_card0[p0_i];
-        const int p0b = d_p0_hand_card1[p0_i];
-        const int p1a = d_p1_hand_card0[p1_i];
-        const int p1b = d_p1_hand_card1[p1_i];
-        const int bo = terminal_index * 5;
-        value = terminal_showdown_utility(
-            pot,
-            p0_committed,
-            p0a,
-            p0b,
-            p1a,
-            p1b,
-            d_terminal_board_cards[bo + 0],
-            d_terminal_board_cards[bo + 1],
-            d_terminal_board_cards[bo + 2],
-            d_terminal_board_cards[bo + 3],
-            d_terminal_board_cards[bo + 4],
-            d_binaries_by_id,
-            d_suitbit_by_id,
-            d_flush,
-            d_noflush7,
-            d_suits,
-            d_dp
-        );
-    } else if (type == static_cast<int>(TerminalType::AllIn)) {
-        const int p0_i = d_p0_pair_index[global_pair];
-        const int p1_i = d_p1_pair_index[global_pair];
-        const int p0a = d_p0_hand_card0[p0_i];
-        const int p0b = d_p0_hand_card1[p0_i];
-        const int p1a = d_p1_hand_card0[p1_i];
-        const int p1b = d_p1_hand_card1[p1_i];
-        const int bo = terminal_index * 5;
-        value = terminal_all_in_runout_utility(
-            pot,
-            p0_committed,
-            p0a,
-            p0b,
-            p1a,
-            p1b,
-            d_terminal_board_cards[bo + 0],
-            d_terminal_board_cards[bo + 1],
-            d_terminal_board_cards[bo + 2],
-            d_terminal_board_cards[bo + 3],
-            d_terminal_board_cards[bo + 4],
-            d_binaries_by_id,
-            d_suitbit_by_id,
-            d_flush,
-            d_noflush7,
-            d_suits,
-            d_dp
-        );
+    std::uint32_t packed = 0;
+    #pragma unroll
+    for (int slot = 0; slot < kShowdownResultsPerWordDevice; ++slot) {
+        const std::size_t result_index = result_base + static_cast<std::size_t>(slot);
+        unsigned char code = kShowdownInvalid;
+        if (result_index < total_results) {
+            const int board_index = static_cast<int>(result_index/static_cast<std::size_t>(hand_pair_count));
+            const int pair_id = static_cast<int>(result_index %static_cast<std::size_t>(hand_pair_count));
+            int b0, b1, b2, b3, b4;
+            if (board_index_to_river_cards_device(board_index,start_board_size,start_board_cards,b0,b1,b2,b3,b4)) {
+                const int p0_i = d_p0_pair_index[pair_id];
+                const int p1_i = d_p1_pair_index[pair_id];
+                const int p0a = d_p0_hand_card0[p0_i];
+                const int p0b = d_p0_hand_card1[p0_i];
+                const int p1a = d_p1_hand_card0[p1_i];
+                const int p1b = d_p1_hand_card1[p1_i];
+                code = compute_showdown_result_code(
+                    p0a,
+                    p0b,
+                    p1a,
+                    p1b,
+                    b0,
+                    b1,
+                    b2,
+                    b3,
+                    b4,
+                    d_binaries_by_id,
+                    d_suitbit_by_id,
+                    d_flush,
+                    d_noflush7,
+                    d_suits,
+                    d_dp
+                );
+            }
+        }
+        packed |= code & 0x3u << static_cast<unsigned int>(slot * 2);
     }
-    d_node_pair_value_p0[static_cast<std::size_t>(node_id) * static_cast<std::size_t>(pair_chunk_size) +static_cast<std::size_t>(local_pair)] = value;
+    d_showdown_words[word_index] = packed;
 }
 } // namespace
 
@@ -805,26 +954,16 @@ void launch_compute_terminal_pair_values_from_records_chunk(
     int active_pair_count,
     int pair_chunk_size,
 
+    int total_hand_pair_count,
+
     const int* d_terminal_nodes,
-    const int* d_terminal_type,
+    const TerminalType* d_terminal_type,
     const int* d_terminal_pot,
     const int* d_terminal_p0_committed,
-    const unsigned char* d_terminal_board_cards,
+    const BoardIndex* d_terminal_board_index,
 
-    const int* d_p0_pair_index,
-    const int* d_p1_pair_index,
-
-    const unsigned char* d_p0_hand_card0,
-    const unsigned char* d_p0_hand_card1,
-    const unsigned char* d_p1_hand_card0,
-    const unsigned char* d_p1_hand_card1,
-
-    short* d_binaries_by_id,
-    short* d_suitbit_by_id,
-    short* d_flush,
-    short* d_noflush7,
-    unsigned char* d_suits,
-    int* d_dp,
+    int showdown_hand_pair_count,
+    const std::uint32_t* d_showdown_words,
 
     float* d_node_pair_value_p0,
 
@@ -834,14 +973,9 @@ void launch_compute_terminal_pair_values_from_records_chunk(
         return;
     }
 
-    if (pair_chunk_size <= 0 || active_pair_count > pair_chunk_size) {
-        return;
-    }
-
-    const std::size_t total = static_cast<std::size_t>(terminal_count) * static_cast<std::size_t>(active_pair_count);
-
-    compute_terminal_pair_values_from_records_chunk_kernel<<<
-        blocks_for_size(total, config.threads_per_block),
+    const std::size_t work_items = static_cast<std::size_t>(terminal_count) * static_cast<std::size_t>(active_pair_count);
+    compute_terminal_pair_values_from_records_cache_chunk_kernel<<<
+        blocks_for_size(work_items, config.threads_per_block),
         config.threads_per_block,
         0,
         stream
@@ -851,26 +985,16 @@ void launch_compute_terminal_pair_values_from_records_chunk(
         active_pair_count,
         pair_chunk_size,
 
+        total_hand_pair_count,
+
         d_terminal_nodes,
         d_terminal_type,
         d_terminal_pot,
         d_terminal_p0_committed,
-        d_terminal_board_cards,
+        d_terminal_board_index,
 
-        d_p0_pair_index,
-        d_p1_pair_index,
-
-        d_p0_hand_card0,
-        d_p0_hand_card1,
-        d_p1_hand_card0,
-        d_p1_hand_card1,
-
-        d_binaries_by_id,
-        d_suitbit_by_id,
-        d_flush,
-        d_noflush7,
-        d_suits,
-        d_dp,
+        showdown_hand_pair_count,
+        d_showdown_words,
 
         d_node_pair_value_p0
     );
@@ -987,6 +1111,73 @@ __global__ void public_backward_pair_value_level_chunk_kernel(
     atomicAdd(
         &d_node_pair_value_write[parent_idx],
         edge_weight * d_node_pair_value_read[child_idx]
+    );
+}
+
+void launch_compute_packed_showdown_result_cache(
+    const KernelLaunchConfig& config,
+
+    int board_count,
+    int hand_pair_count,
+
+    int start_board_size,
+    const unsigned char* d_start_board_cards,
+
+    const int* d_p0_pair_index,
+    const int* d_p1_pair_index,
+
+    const unsigned char* d_p0_hand_card0,
+    const unsigned char* d_p0_hand_card1,
+    const unsigned char* d_p1_hand_card0,
+    const unsigned char* d_p1_hand_card1,
+
+    short* d_binaries_by_id,
+    short* d_suitbit_by_id,
+    short* d_flush,
+    short* d_noflush7,
+    unsigned char* d_suits,
+    int* d_dp,
+
+    std::uint32_t* d_showdown_words,
+
+    cudaStream_t stream
+) {
+    if (board_count <= 0 || hand_pair_count <= 0) {
+        return;
+    }
+    const std::size_t result_count =static_cast<std::size_t>(board_count) * static_cast<std::size_t>(hand_pair_count);
+    const std::size_t word_count = (result_count + static_cast<std::size_t>(kShowdownResultsPerWordDevice) - 1) / static_cast<std::size_t>(kShowdownResultsPerWordDevice);
+    if (word_count == 0) {
+        return;
+    }
+    compute_packed_showdown_result_cache_kernel<<<
+        blocks_for_size(word_count, config.threads_per_block),
+        config.threads_per_block,
+        0,
+        stream
+    >>>(
+        board_count,
+        hand_pair_count,
+
+        start_board_size,
+        d_start_board_cards,
+
+        d_p0_pair_index,
+        d_p1_pair_index,
+
+        d_p0_hand_card0,
+        d_p0_hand_card1,
+        d_p1_hand_card0,
+        d_p1_hand_card1,
+
+        d_binaries_by_id,
+        d_suitbit_by_id,
+        d_flush,
+        d_noflush7,
+        d_suits,
+        d_dp,
+
+        d_showdown_words
     );
 }
 // -----------------------------------------------------------------------------

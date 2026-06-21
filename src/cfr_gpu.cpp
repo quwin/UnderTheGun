@@ -20,8 +20,6 @@
 #include <cuda_runtime_api.h>
 
 #include <algorithm>
-#include <cstddef>
-#include <cstdint>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
@@ -31,6 +29,7 @@
 
 namespace poker {
 namespace {
+constexpr int kBoardIndexCount = 1 + 52 + 1326; // 1379
 
 // Profiling Helper
 struct GpuStageTimer {
@@ -361,16 +360,13 @@ void flatten_terminal_data_for_gpu(const Game& game, FlatTerminalData& flat, con
         flat.terminal_type.resize(terminal_count);
         flat.pot.resize(terminal_count);
         flat.p0_committed.resize(terminal_count);
-        flat.terminal_board_cards.assign(terminal_count*5, kNumCards); // 0-51 = cards, 52 = no card available
-        for (int t = 0; t < terminal_count; ++t) {
-            const auto&[type, board_index, pot, p0_committed] = game.terminal_records[static_cast<std::size_t>(t)];
-            flat.terminal_type[static_cast<std::size_t>(t)] = static_cast<int>(type);
-            Board board = make_board(game.starting_board, board_index);
-            for (size_t i = 0; i < board.cards.size(); ++i) {
-                flat.terminal_board_cards[(5*t) + i] = board.cards[i];
-            }
-            flat.pot[static_cast<std::size_t>(t)] = pot;
-            flat.p0_committed[static_cast<std::size_t>(t)] = p0_committed;
+        flat.board_index.resize(terminal_count);
+        for (std::size_t t{0}; t < terminal_count; ++t) {
+            const auto&[type, board_index, pot, p0_committed] = game.terminal_records[t];
+            flat.terminal_type[t] = type;
+            flat.board_index[t] = board_index;
+            flat.pot[t] = pot;
+            flat.p0_committed[t] = p0_committed;
         }
     }
 }
@@ -404,6 +400,112 @@ void GpuCfrSolver::upload_hand_evaluator_tables() {
     );
 }
 
+    void GpuCfrSolver::allocate_showdown_result_cache() {
+    DeviceShowdownResultCache& cache = gpu_.showdown_cache;
+    const FlatHandData& hands = gpu_.hands;
+    if (hands.hand_pair_count <= 0) {
+        throw std::logic_error(
+            "Cannot allocate showdown cache before hand data is initialized."
+        );
+    }
+    cache.hand_pair_count = hands.hand_pair_count;
+    cache.result_count = showdown_result_count(cache.board_count, cache.hand_pair_count);
+    cache.word_count = packed_showdown_word_count(cache.board_count, cache.hand_pair_count);
+    if (cache.result_count == 0 || cache.word_count == 0) {
+        throw std::logic_error("Showdown cache size is zero.");
+    }
+    cache.start_board_size = static_cast<int>(game_.starting_board.cards.size());
+
+    std::vector<unsigned char> start_board_cards(5, 52);
+    for (int i = 0; i < cache.start_board_size; ++i) {
+        const int card = game_.starting_board.cards[static_cast<std::size_t>(i)];
+        if (card < 0 || card >= 52) {
+            throw std::logic_error("Starting board contains invalid card id.");
+        }
+        start_board_cards[static_cast<std::size_t>(i)] =
+            static_cast<unsigned char>(card);
+    }
+    cuda_alloc_copy(&cache.d_start_board_cards, start_board_cards);
+    cuda_alloc_zero(&cache.d_words, cache.word_count);
+    // Initialize every 2-bit slot to Invalid = 3.
+    check_cuda(cudaMemset(cache.d_words,0xFF,cache.word_count * sizeof(std::uint32_t)),"cudaMemset showdown cache failed");
+    stats_.showdown_result_cache_bytes = cache.word_count * sizeof(std::uint32_t);
+}
+void GpuCfrSolver::compute_showdown_result_cache() const {
+    const DeviceShowdownResultCache& cache = gpu_.showdown_cache;
+    const DeviceHandData& hands = gpu_.hand_data;
+    const DeviceHandEvaluatorTables& eval = gpu_.eval_tables;
+
+    if (cache.d_words == nullptr) {
+        throw std::logic_error(
+            "Showdown cache must be allocated before it is computed."
+        );
+    }
+
+    if (cache.board_count <= 0 || cache.hand_pair_count <= 0 || cache.word_count == 0) {
+        throw std::logic_error("Showdown cache metadata is invalid.");
+    }
+
+    if (hands.d_p0_pair_index == nullptr ||
+        hands.d_p1_pair_index == nullptr ||
+        hands.d_p0_hand_card0 == nullptr ||
+        hands.d_p0_hand_card1 == nullptr ||
+        hands.d_p1_hand_card0 == nullptr ||
+        hands.d_p1_hand_card1 == nullptr) {
+        throw std::logic_error(
+            "Device hand data must be uploaded before computing showdown cache."
+        );
+    }
+
+    if (eval.d_binaries_by_id == nullptr ||
+        eval.d_suitbit_by_id == nullptr ||
+        eval.d_flush == nullptr ||
+        eval.d_noflush7 == nullptr ||
+        eval.d_suits == nullptr ||
+        eval.d_dp == nullptr) {
+        throw std::logic_error(
+            "Evaluator tables must be uploaded before computing showdown cache."
+        );
+    }
+    KernelLaunchConfig launch;
+    launch.threads_per_block = config_.threads_per_block;
+    launch_compute_packed_showdown_result_cache(
+        launch,
+
+        cache.board_count,
+        cache.hand_pair_count,
+
+        gpu_.showdown_cache.start_board_size,
+        gpu_.showdown_cache.d_start_board_cards,
+
+        hands.d_p0_pair_index,
+        hands.d_p1_pair_index,
+
+        hands.d_p0_hand_card0,
+        hands.d_p0_hand_card1,
+        hands.d_p1_hand_card0,
+        hands.d_p1_hand_card1,
+
+        eval.d_binaries_by_id,
+        eval.d_suitbit_by_id,
+        eval.d_flush,
+        eval.d_noflush7,
+        eval.d_suits,
+        eval.d_dp,
+
+        cache.d_words
+    );
+    check_cuda(
+        cudaGetLastError(),
+        "launch_compute_packed_showdown_result_cache failed"
+    );
+    if (config_.synchronize_each_iteration) {
+        check_cuda(
+            cudaDeviceSynchronize(),
+            "compute_showdown_result_cache synchronize failed"
+        );
+    }
+}
 // -----------------------------------------------------------------------------
 // Construction / destruction
 // -----------------------------------------------------------------------------
@@ -549,11 +651,14 @@ void GpuCfrSolver::initialize() {
         if (config_.terminal_mode == TerminalMode::RecordComputed) {
             gpu_.host_eval_tables = load_hand_evaluator_tables(config_.evaluator_data_dir);
             upload_hand_evaluator_tables();
+            allocate_showdown_result_cache();
+            compute_showdown_result_cache();
         }
         const std::size_t node_pair_entries = checked_mul(static_cast<std::size_t>(gpu_.game.num_nodes),static_cast<std::size_t>(gpu_.hand_data.hand_pair_count),"node_pair_entries");
         const std::size_t node_pair_bytes = checked_mul(node_pair_entries, sizeof(float), "node_pair_bytes");
         std::cerr
-            << "[gpu memory] num_nodes=" << gpu_.game.num_nodes
+            << "[gpu memory] num_nodes=" << gpu_.game.num_nodes << "\n"
+            << " terminal_node_count=" << gpu_.terminals.terminal_count()
             << " hand_pair_count=" << gpu_.hand_data.hand_pair_count
             << " node_pair_entries=" << node_pair_entries
             << " node_pair_value MiB="
@@ -581,6 +686,8 @@ void GpuCfrSolver::release() {
     DeviceTerminalData& terminals = gpu_.terminal_data;
     DevicePublicCfrState& cfr = gpu_.cfr;
     DevicePublicWorkBuffers& work = gpu_.work;
+    DeviceShowdownResultCache& showdown = gpu_.showdown_cache;
+    DeviceHandEvaluatorTables& eval = gpu_.eval_tables;
 
     cuda_free_ptr(game.d_parent);
     cuda_free_ptr(game.d_depth);
@@ -633,9 +740,12 @@ void GpuCfrSolver::release() {
     cuda_free_ptr(terminals.d_terminal_value_p0);
 
     cuda_free_ptr(terminals.d_terminal_type);
-    cuda_free_ptr(terminals.d_terminal_board_cards);
+    cuda_free_ptr(terminals.d_board_index);
     cuda_free_ptr(terminals.d_pot);
     cuda_free_ptr(terminals.d_p0_committed);
+
+    cuda_free_ptr(showdown.d_words);
+    cuda_free_ptr(showdown.d_start_board_cards);
 
     cuda_free_ptr(cfr.d_sigma);
     cuda_free_ptr(cfr.d_sigma_init);
@@ -650,8 +760,6 @@ void GpuCfrSolver::release() {
     cuda_free_ptr(work.d_node_pair_reach_p1);
     cuda_free_ptr(work.d_node_pair_reach_chance);
 
-    DeviceHandEvaluatorTables& eval = gpu_.eval_tables;
-
     cuda_free_ptr(eval.d_binaries_by_id);
     cuda_free_ptr(eval.d_suitbit_by_id);
     cuda_free_ptr(eval.d_flush);
@@ -659,14 +767,14 @@ void GpuCfrSolver::release() {
     cuda_free_ptr(eval.d_suits);
     cuda_free_ptr(eval.d_dp);
 
-    gpu_.eval_tables = DeviceHandEvaluatorTables{};
+    eval = DeviceHandEvaluatorTables{};
     gpu_.host_eval_tables = HostHandEvaluatorTables{};
-
-    gpu_.game = DevicePublicGameData{};
-    gpu_.hand_data = DeviceHandData{};
-    gpu_.terminal_data = DeviceTerminalData{};
-    gpu_.cfr = DevicePublicCfrState{};
-    gpu_.work = DevicePublicWorkBuffers{};
+    game = DevicePublicGameData{};
+    hands = DeviceHandData{};
+    terminals = DeviceTerminalData{};
+    cfr = DevicePublicCfrState{};
+    work = DevicePublicWorkBuffers{};
+    showdown = DeviceShowdownResultCache{};
 
     initialized_ = false;
     terminal_values_uploaded_ = false;
@@ -763,7 +871,7 @@ void GpuCfrSolver::upload_terminal_data() {
     );
     if (config_.terminal_mode == TerminalMode::RecordComputed) {
         cuda_alloc_copy(&terminals.d_terminal_type, flat.terminal_type);
-        cuda_alloc_copy(&terminals.d_terminal_board_cards, flat.terminal_board_cards);
+        cuda_alloc_copy(&terminals.d_board_index, flat.board_index);
         cuda_alloc_copy(&terminals.d_pot, flat.pot);
         cuda_alloc_copy(&terminals.d_p0_committed, flat.p0_committed);
     }
@@ -927,7 +1035,7 @@ void GpuCfrSolver::initialize_strategy() const {
 // Run API
 // -----------------------------------------------------------------------------
 
-void GpuCfrSolver::run_iterations(int iterations, bool profiled = false) {
+void GpuCfrSolver::run_iterations(int iterations, bool profiled) {
     if (iterations < 0) {
         throw std::invalid_argument("iterations must be nonnegative.");
     }
@@ -1018,7 +1126,7 @@ void GpuCfrSolver::run_one_iteration_profiled() {
         });
 
         terminal_kernel_ms += timer.time_ms([&] {
-            run_terminal_evaluation_pass_for_chunk_without_clear(
+            run_terminal_evaluation_pass_for_chunk(
                 pair_start,
                 active_pair_count
             );
@@ -1106,32 +1214,21 @@ void GpuCfrSolver::run_one_iteration_profiled() {
     if (config_.terminal_mode == TerminalMode::RecordComputed) {
         launch_compute_terminal_pair_values_from_records_chunk(
             launch,
-            gpu_.terminal_data.terminal_count,
 
+            gpu_.terminal_data.terminal_count,
             pair_start,
             active_pair_count,
             gpu_.work.pair_chunk_size,
+            gpu_.hands.hand_pair_count,
 
             gpu_.terminal_data.d_terminal_nodes,
             gpu_.terminal_data.d_terminal_type,
             gpu_.terminal_data.d_pot,
             gpu_.terminal_data.d_p0_committed,
-            gpu_.terminal_data.d_terminal_board_cards,
+            gpu_.terminal_data.d_board_index,
 
-            gpu_.hand_data.d_p0_pair_index,
-            gpu_.hand_data.d_p1_pair_index,
-
-            gpu_.hand_data.d_p0_hand_card0,
-            gpu_.hand_data.d_p0_hand_card1,
-            gpu_.hand_data.d_p1_hand_card0,
-            gpu_.hand_data.d_p1_hand_card1,
-
-            gpu_.eval_tables.d_binaries_by_id,
-            gpu_.eval_tables.d_suitbit_by_id,
-            gpu_.eval_tables.d_flush,
-            gpu_.eval_tables.d_noflush7,
-            gpu_.eval_tables.d_suits,
-            gpu_.eval_tables.d_dp,
+            gpu_.showdown_cache.hand_pair_count,
+            gpu_.showdown_cache.d_words,
 
             gpu_.work.d_node_pair_value_p0
         );

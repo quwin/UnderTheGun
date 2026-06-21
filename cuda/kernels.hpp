@@ -122,11 +122,29 @@ void launch_compute_terminal_pair_values_from_records_chunk(
     int active_pair_count,
     int pair_chunk_size,
 
+    int total_hand_pair_count,
+
     const int* d_terminal_nodes,
-    const int* d_terminal_type,
+    const TerminalType* d_terminal_type,
     const int* d_terminal_pot,
     const int* d_terminal_p0_committed,
-    const unsigned char* d_terminal_board_cards,
+    const BoardIndex* d_terminal_board_index,
+
+    int showdown_hand_pair_count,
+    const std::uint32_t* d_showdown_words,
+
+    float* d_node_pair_value_p0,
+
+    cudaStream_t stream = nullptr
+);
+void launch_compute_packed_showdown_result_cache(
+    const KernelLaunchConfig& config,
+
+    int board_count,
+    int hand_pair_count,
+
+    int start_board_size,
+    const unsigned char* d_start_board_cards,
 
     const int* d_p0_pair_index,
     const int* d_p1_pair_index,
@@ -143,7 +161,7 @@ void launch_compute_terminal_pair_values_from_records_chunk(
     unsigned char* d_suits,
     int* d_dp,
 
-    float* d_node_pair_value_p0,
+    std::uint32_t* d_showdown_words,
 
     cudaStream_t stream = nullptr
 );
