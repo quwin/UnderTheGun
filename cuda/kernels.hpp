@@ -129,6 +129,7 @@ void launch_compute_terminal_pair_values_from_records_chunk(
     const int* d_terminal_pot,
     const int* d_terminal_p0_committed,
     const BoardIndex* d_terminal_board_index,
+    const int start_board_size,
 
     int showdown_hand_pair_count,
     const std::uint32_t* d_showdown_words,

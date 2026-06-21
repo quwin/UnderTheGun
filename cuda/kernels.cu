@@ -316,9 +316,9 @@ __device__ unsigned int unpack_showdown_result_2bit(
 }
 
 __device__ float utility_from_showdown_code_p0(
-    unsigned int code,
-    int pot,
-    int p0_committed
+    const unsigned int code,
+    const int pot,
+    const int p0_committed
 ) {
     if (code == kShowdownP0Wins) {
         return static_cast<float>(pot - p0_committed);
@@ -358,6 +358,7 @@ __device__ float terminal_utility_from_record_and_cache_p0(
     const int pot,
     const int p0_committed,
     const BoardIndex board_index,
+    const int start_board_size,
     const int global_pair_id,
     const int showdown_hand_pair_count,
     const std::uint32_t* __restrict__ showdown_words
@@ -378,9 +379,9 @@ __device__ float terminal_utility_from_record_and_cache_p0(
     if (terminal_type == TerminalType::AllIn) {
         float running_utility = 0.0f;
         int valid_boards = 0;
-        // All-in on starting board.
+        // All-in on flop.
         // Loops all possible turn+river BoardIndex values.
-        if (board_index == 0) {
+        if (start_board_size == 3) {
             #pragma unroll
             for (std::size_t final_board_index{1}; final_board_index < kBoardIndexCount; ++final_board_index) {
                 const std::size_t result_index = final_board_index * showdown_pair_count + pair_id;
@@ -396,9 +397,8 @@ __device__ float terminal_utility_from_record_and_cache_p0(
                 ++valid_boards;
             }
         }
-        // All-in after exactly one public card has been added since start.
-        // Can't go out of bounds due to
-        else if (board_index <= kNumCards) {
+        // All-in on turn
+        else if (start_board_size == 4) {
             const int known_extra_card = static_cast<int>(board_index) - 1;
             #pragma unroll
             for (int river_card{0}; river_card < kNumCards; ++river_card) {
@@ -660,6 +660,7 @@ __global__ void compute_terminal_pair_values_from_records_cache_chunk_kernel(
     const int* __restrict__ d_terminal_pot,
     const int* __restrict__ d_terminal_p0_committed,
     const BoardIndex* __restrict__ d_terminal_board_index,
+    const int start_board_size,
 
     const int showdown_hand_pair_count,
     const std::uint32_t* __restrict__ d_showdown_words,
@@ -694,6 +695,7 @@ __global__ void compute_terminal_pair_values_from_records_cache_chunk_kernel(
             pot,
             p0_committed,
             board_index,
+            start_board_size,
             global_pair_id,
             showdown_hand_pair_count,
             d_showdown_words
@@ -772,7 +774,7 @@ __global__ void compute_packed_showdown_result_cache_kernel(
                 );
             }
         }
-        packed |= code & 0x3u << static_cast<unsigned int>(slot * 2);
+        packed |= (static_cast<std::uint32_t>(code) & 0x3u) << static_cast<unsigned int>(slot * 2);
     }
     d_showdown_words[word_index] = packed;
 }
@@ -961,6 +963,7 @@ void launch_compute_terminal_pair_values_from_records_chunk(
     const int* d_terminal_pot,
     const int* d_terminal_p0_committed,
     const BoardIndex* d_terminal_board_index,
+    const int start_board_size,
 
     int showdown_hand_pair_count,
     const std::uint32_t* d_showdown_words,
@@ -992,6 +995,7 @@ void launch_compute_terminal_pair_values_from_records_chunk(
         d_terminal_pot,
         d_terminal_p0_committed,
         d_terminal_board_index,
+        start_board_size,
 
         showdown_hand_pair_count,
         d_showdown_words,

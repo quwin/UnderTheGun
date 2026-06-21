@@ -1226,6 +1226,7 @@ void GpuCfrSolver::run_one_iteration_profiled() {
             gpu_.terminal_data.d_pot,
             gpu_.terminal_data.d_p0_committed,
             gpu_.terminal_data.d_board_index,
+            gpu_.showdown_cache.start_board_size,
 
             gpu_.showdown_cache.hand_pair_count,
             gpu_.showdown_cache.d_words,
