@@ -86,7 +86,8 @@ struct NodeEdge {
     // For action edges, this should be -1.
     int public_card = -1;
     // Action edges use 1.0.
-    // Chance edges use normalized transition probability.
+    // Chance edges use the board-only transition probability. Traversals remove
+    // private-card collisions and renormalize for each exact hand pair.
     float chance_prob = 1.0f;
 };
 // -----------------------------------------------------------------------------

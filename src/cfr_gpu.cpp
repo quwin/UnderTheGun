@@ -253,6 +253,31 @@ FlatPublicGame flatten_public_game_for_gpu(const Game& game, FlatTerminalData& f
         flat.player[node_id] = player_to_int(node.player);
         flat.node_type[node_id] = node_type_to_int(node.type);
         flat.action_state_index[node_id] = node.action_state_index;
+        FlatPublicLevelEdges& level = flat.level_edges[static_cast<std::size_t>(node.depth)];
+        int chance_group = -1;
+        if (node.type == PublicNodeType::Chance) {
+            PublicChanceGroup group;
+            group.first_edge = level.size();
+            group.edge_count = node.edge_count;
+            group.uniform = 1;
+            double mass = 0.0;
+            for (int local = 0; local < node.edge_count; ++local) {
+                const auto& edge = game.edge(node.first_edge + local);
+                if (edge.public_card < 0 || edge.public_card >= 52 ||
+                    !std::isfinite(edge.chance_prob) || edge.chance_prob <= 0.0f)
+                    throw std::invalid_argument("Invalid public chance edge.");
+                const auto bit = std::uint64_t{1} << edge.public_card;
+                if (group.card_mask & bit)
+                    throw std::invalid_argument("Duplicate card in public chance outcomes.");
+                group.card_mask |= bit;
+                mass += edge.chance_prob;
+                if (edge.chance_prob != game.edge(node.first_edge).chance_prob) group.uniform = 0;
+            }
+            if (std::abs(mass - 1.0) > 1e-5)
+                throw std::invalid_argument("Public chance probabilities must sum to one.");
+            chance_group = static_cast<int>(level.chance_groups.size());
+            level.chance_groups.push_back(group);
+        }
         for (int local = 0; local < node.edge_count; ++local) {
             const int edge_id = node.first_edge + local;
             const NodeEdge& edge = game.edge(edge_id);
@@ -272,7 +297,8 @@ FlatPublicGame flatten_public_game_for_gpu(const Game& game, FlatTerminalData& f
                 throw std::runtime_error("Terminal node cannot have outgoing edges.");
             }
 
-            FlatPublicLevelEdges& level = flat.level_edges[static_cast<std::size_t>(node.depth)];
+            level.public_card.push_back(edge.public_card);
+            level.chance_group.push_back(chance_group);
             level.parent.push_back(node_id);
             level.child.push_back(edge.child);
             level.local_action.push_back(local_action);
@@ -714,6 +740,9 @@ void GpuCfrSolver::release() {
         cuda_free_ptr(level.d_child);
         cuda_free_ptr(level.d_local_action);
         cuda_free_ptr(level.d_chance_prob);
+        cuda_free_ptr(level.d_public_card);
+        cuda_free_ptr(level.d_chance_group);
+        cuda_free_ptr(level.d_chance_groups);
         level.count = 0;
     }
 
@@ -728,7 +757,7 @@ void GpuCfrSolver::release() {
     cuda_free_ptr(hands.d_p0_hand_card0);
     cuda_free_ptr(hands.d_p0_hand_card1);
     cuda_free_ptr(hands.d_p1_hand_card0);
-    cuda_free_ptr(hands.d_p0_hand_card1);
+    cuda_free_ptr(hands.d_p1_hand_card1);
     cuda_free_ptr(hands.d_p0_pair_index);
     cuda_free_ptr(hands.d_p1_pair_index);
     cuda_free_ptr(hands.d_p0_bucket_by_hand_index);
@@ -824,6 +853,9 @@ void GpuCfrSolver::upload_static_game() {
         cuda_alloc_copy(&dst.d_child, src.child);
         cuda_alloc_copy(&dst.d_local_action, src.local_action);
         cuda_alloc_copy(&dst.d_chance_prob, src.chance_prob);
+        cuda_alloc_copy(&dst.d_public_card, src.public_card);
+        cuda_alloc_copy(&dst.d_chance_group, src.chance_group);
+        cuda_alloc_copy(&dst.d_chance_groups, src.chance_groups);
     }
 
     game.action_edges.count =
@@ -1265,6 +1297,7 @@ void GpuCfrSolver::run_backward_value_pass_for_chunk(
         launch_public_backward_pair_value_level_chunk(
             launch,
             edges,
+            gpu_.hand_data,
 
             gpu_.game.d_node_type,
             gpu_.game.d_player,
@@ -1326,6 +1359,7 @@ void GpuCfrSolver::run_reach_pass_for_chunk(
         launch_public_forward_pair_reach_level_chunk(
             launch,
             edges,
+            gpu_.hand_data,
 
             gpu_.game.d_node_type,
             gpu_.game.d_player,

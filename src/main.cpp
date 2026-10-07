@@ -137,7 +137,7 @@ poker::holdem::HoldemSubgameConfig make_test_config() {
     config.p0_range = make_tiny_p0_range();
     config.p1_range = make_tiny_p1_range();
     config.betting_abstraction = poker::holdem::make_standard_abstraction();
-    config.board_abstraction = poker::holdem::make_isomorphic_board_abstraction(config.p0_range,config.p1_range);
+    config.board_abstraction = poker::holdem::make_exact_board_abstraction();
     config.terminal_mode = poker::TerminalMode::RecordComputed;
     return config;
 }

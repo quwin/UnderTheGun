@@ -35,6 +35,16 @@ they do not depend on the test process's working directory.
 - GPU flattening, root learning signals, and CPU/GPU average strategy and EV
   agreement after one and 500 iterations. The agreement fixture forces two-pair
   chunks to exercise accumulation across chunks.
+- Private-card-conditioned turn/flop chance: a guaranteed royal flush retains
+  all 1000 chips, and mixed-hand check-only EVs match independent enumeration
+  of all 44 legal rivers or 990 legal final boards per private pair.
+- Weighted public chance with different blockers per pair, including analytic
+  best-response values, counterfactual regret and average-strategy weights.
+- Turn/flop CPU/GPU learning signals and average strategies across one-pair
+  and partial three-pair chunks. GPU regret sums use unnormalized uniform pair
+  weights, so comparisons divide them by the total pair count.
+- Collapsed flop/turn all-in equities, including turn all-ins reached from a
+  flop, and rejection of suit compression without private-hand remapping.
 
 The street-tree tests share `tests/subgame_tree_checks.hpp` and build each tree
 once. They use a small betting abstraction with pot-sized all-in bets and exact
@@ -57,7 +67,15 @@ opponent/chance reach, excluding the responder's own submitted strategy. This
 supports multi-hand exploitability within the current exact-hand public-tree
 representation. Values still depend on the game's terminal and chance semantics.
 
-Turn/flop tests verify the public-tree representation and public chance
-distribution. They do not establish correct private-card-conditioned runout
-probabilities or solve accuracy. The turn/flop accuracy issue needs a separate
-numerical regression fixture and solver fix.
+Public chance edges store the board-only distribution. CPU, GPU and profile/
+best-response evaluation exclude the four private cards and renormalize legal
+outcomes per pair. Exact turn transitions consequently use 1/44 rather than
+1/48; flop transitions use 1/45 followed by 1/44. The GUI and benchmark use exact
+runouts. The builder rejects suit-isomorphic abstractions until their private
+hands can be remapped correctly; exact trees can use more memory.
+
+These regressions establish runout/equity semantics and CPU/GPU agreement for
+small fixtures. They do not establish convergence for arbitrary large flop
+games or validate every betting abstraction. The GPU's `last_root_value_p0`
+stats field remains unpopulated; tests check its learning signals and evaluate
+its returned policies through the independently checked profile evaluator.

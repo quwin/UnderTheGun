@@ -1,3 +1,4 @@
+#include "chance_probability.hpp"
 #include "cfr_cpu.hpp"
 
 #include <algorithm>
@@ -286,25 +287,15 @@ double CpuCfrSolver::traverse_chance_node(
     }
 
     double value = 0.0;
-
+    const auto probabilities = chance_probabilities_for_pair(game_, node, hand_pair_id);
     for (int local = 0; local < node.edge_count; ++local) {
+        const double probability = probabilities[local];
+        if (probability == 0.0) continue;
         const NodeEdge& edge = outgoing_edge(node, local);
-
-        if (!is_finite_probability(edge.chance_prob) ||
-            edge.chance_prob <= 0.0f) {
-            throw std::runtime_error(
-                "Chance edge has invalid probability."
-            );
-        }
-
-        value += static_cast<double>(edge.chance_prob) *
-            cfr_traverse_pair(
-                edge.child,
-                hand_pair_id,
-                reach_p0,
-                reach_p1,
-                reach_chance * static_cast<double>(edge.chance_prob)
-            );
+        value += probability * cfr_traverse_pair(
+            edge.child, hand_pair_id, reach_p0, reach_p1,
+            reach_chance * probability
+        );
     }
 
     return value;
@@ -354,12 +345,12 @@ double CpuCfrSolver::traverse_player_node(
         acting_player == Player::P0 ? reach_p1 : reach_p0;
 
     // Average-strategy accumulation. This stores the current frozen sigma,
-    // weighted by the acting player's reach. The pair probability keeps exact
-    // hand-bucket accumulation range-aware.
+    // weighted by own and chance reach. Blocked runouts contribute no weight;
+    // pair probability keeps exact hand-bucket accumulation range-aware.
     accumulate_average_strategy(
         state,
         bucket,
-        pair_probability * average_iteration_weight * own_reach
+        pair_probability * average_iteration_weight * own_reach * reach_chance
     );
 
     std::vector<double> action_values_p0(
