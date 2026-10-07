@@ -297,6 +297,10 @@ add_executable(test_range_weights tests/test_range_weights.cpp)
 target_link_libraries(test_range_weights PRIVATE kuhn_gpu_cfr_lib)
 target_compile_definitions(test_range_weights PRIVATE UTG_TEST_EVALUATOR_DIR="${UTG_EVALUATOR_TABLE_DIR}")
 add_test(NAME test_range_weights COMMAND test_range_weights)
+add_executable(test_cfr_plus tests/test_cfr_plus.cpp)
+target_link_libraries(test_cfr_plus PRIVATE kuhn_gpu_cfr_lib)
+target_compile_definitions(test_cfr_plus PRIVATE UTG_TEST_EVALUATOR_DIR="${UTG_EVALUATOR_TABLE_DIR}")
+add_test(NAME test_cfr_plus COMMAND test_cfr_plus)
 
 add_executable(test_solver_validity
         tests/test_solver_validity.cpp

@@ -69,6 +69,7 @@ CpuCfrSolver::CpuCfrSolver(
       config_(config),
       stats_{},
       regret_sum_(game.cfr_tensor_entries(), 0.0f),
+      iteration_regret_delta_(game.cfr_tensor_entries(), 0.0),
       strategy_sum_(game.cfr_tensor_entries(), 0.0f),
       current_strategy_(game.cfr_tensor_entries(), 0.0f),
       strategy_weight_sum_(game.state_bucket_entries(), 0.0f) {
@@ -123,6 +124,7 @@ void CpuCfrSolver::run_one_iteration() {
     // Freeze sigma for this entire iteration. Regret updates performed during
     // traversal should not affect action probabilities until the next iteration.
     compute_all_current_strategies();
+    std::fill(iteration_regret_delta_.begin(), iteration_regret_delta_.end(), 0.0);
 
     const double weight_sum = normalized_hand_pair_weight_sum();
 
@@ -151,6 +153,14 @@ void CpuCfrSolver::run_one_iteration() {
         root_value_p0 += pair_probability * pair_value_p0;
     }
 
+    // Aggregate every compatible hidden hand before clipping CFR+ regrets.
+    // Clipping per pair would make the update depend on private-pair ordering.
+    for (std::size_t idx = 0; idx < regret_sum_.size(); ++idx) {
+        double updated = static_cast<double>(regret_sum_[idx]) + iteration_regret_delta_[idx];
+        if (config_.use_cfr_plus) updated = std::max(0.0, updated);
+        if (!std::isfinite(updated)) throw std::runtime_error("Regret update produced non-finite value.");
+        regret_sum_[idx] = static_cast<float>(updated);
+    }
     stats_.last_root_value_p0 = root_value_p0;
     ++stats_.iterations_run;
 
@@ -589,21 +599,9 @@ void CpuCfrSolver::update_regrets(
 
         const std::size_t idx = tensor_index(state, bucket, a);
 
-        double updated =
-            static_cast<double>(regret_sum_[idx]) +
-            instantaneous_regret;
-
-        if (config_.use_cfr_plus) {
-            updated = std::max(0.0, updated);
-        }
-
-        if (!std::isfinite(updated)) {
-            throw std::runtime_error(
-                "Regret update produced non-finite value."
-            );
-        }
-
-        regret_sum_[idx] = static_cast<float>(updated);
+        iteration_regret_delta_[idx] += instantaneous_regret;
+        if (!std::isfinite(iteration_regret_delta_[idx]))
+            throw std::runtime_error("Regret delta produced non-finite value.");
     }
 }
 

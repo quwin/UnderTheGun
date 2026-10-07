@@ -87,3 +87,7 @@ record-computed CPU/GPU learning after a non-all-in turn bet and river fold.
 Range-product weights are retained for each legal hand pair and used by default
 in CPU training, GPU counterfactual/average reach, and profile/best-response
 evaluation. Empty weights on manually built games continue to mean uniform.
+
+CPU CFR+ aggregates a complete iteration of counterfactual regret before
+clipping at zero. Cancellation, private-pair permutations, nonuniform weights,
+and CPU/GPU CFR+ with linear averaging are covered by dedicated regressions.
