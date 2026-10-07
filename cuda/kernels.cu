@@ -227,10 +227,6 @@ namespace {
         const int actions = action_count[state];
 
         for (int bucket = threadIdx.x; bucket < buckets; bucket += blockDim.x) {
-            const std::uint64_t sb =
-                bucket_offset[state] + static_cast<std::uint64_t>(bucket);
-
-            const float denom = strategy_weight_sum[sb];
             const float uniform = 1.0f / static_cast<float>(actions);
 
             const std::uint64_t base =
@@ -238,6 +234,11 @@ namespace {
                 static_cast<std::uint64_t>(bucket) *
                     static_cast<std::uint64_t>(actions);
 
+            // Normalize the actual action mass, whose accumulation can round
+            // differently from the separate per-bucket weight counter.
+            float denom = 0.0f;
+            for (int a = 0; a < actions; ++a)
+                denom += strategy_sum[base + static_cast<std::uint64_t>(a)];
             for (int a = 0; a < actions; ++a) {
                 const std::uint64_t idx = base + static_cast<std::uint64_t>(a);
 
