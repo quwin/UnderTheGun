@@ -208,6 +208,44 @@ void test_street_learning_parity() {
     }
 }
 
+void test_cross_street_record_accounting() {
+    auto config = tiny_config(4);
+    config.betting_abstraction.first_bet_sizes = {poker::holdem::BetSize::pot_fraction(0.1)};
+    config.terminal_mode = poker::TerminalMode::RecordComputed;
+    const auto game = poker::holdem::HoldemSubgameBuilder(config).build();
+    auto follow = [&](int node, poker::holdem::ActionType type) {
+        const auto& state = game.action_state(game.node(node).action_state_index);
+        const int action = local_action(game, state, type);
+        check(action >= 0, "Regression action is legal.");
+        return game.edge(game.node(node).first_edge + action).child;
+    };
+    int node = follow(game.root, poker::holdem::ActionType::Bet);
+    node = follow(node, poker::holdem::ActionType::Call);
+    check(game.node(node).type == poker::PublicNodeType::Chance, "Non-all-in call advances to river.");
+    const int pair = 0;
+    const auto probabilities = poker::chance_probabilities_for_pair(game, game.node(node), pair);
+    int legal = 0;
+    while (probabilities[legal] == 0.0) ++legal;
+    node = game.edge(game.node(node).first_edge + legal).child;
+    node = follow(node, poker::holdem::ActionType::Check);
+    node = follow(node, poker::holdem::ActionType::Bet);
+    node = follow(node, poker::holdem::ActionType::Fold);
+    poker::TerminalValueProvider terminals;
+    check_near(terminals.utility_p0(game, node, pair), -100.0, 1e-6,
+               "Record-computed river fold must retain the turn bet.");
+    poker::CpuCfrSolver cpu(game, terminals);
+    poker::GpuCfrConfig gpu_config;
+    gpu_config.evaluator_data_dir = UTG_TEST_EVALUATOR_DIR;
+    gpu_config.pair_chunk_size = 3;
+    poker::GpuCfrSolver gpu(game, gpu_config);
+    cpu.run_one_iteration(); gpu.run_one_iteration();
+    const auto regrets = gpu.regret_sum();
+    for (std::size_t i = 0; i < regrets.size(); ++i)
+        check_near(regrets[i] / game.hand_pairs.pair_count(), cpu.regret_sum()[i], 0.01,
+                   "CPU/GPU agree after non-all-in contributions cross a street.");
+    std::cout << "[pass] cross-street record accounting and GPU agreement\n";
+}
+
 void test_collapsed_all_in_equity() {
     for (int board_size : {4, 3}) {
         auto config = tiny_config(board_size);
@@ -266,5 +304,6 @@ int main() { return run([] {
     test_weighted_chance_reach();
     test_street_learning_parity();
     test_collapsed_all_in_equity();
+    test_cross_street_record_accounting();
     test_reject_unsafe_suit_compression();
 }); }

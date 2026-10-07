@@ -274,7 +274,7 @@ void HoldemSubgameBuilder::finalize_terminal_node(
         auto record = TerminalRecord();
         record.type = state.terminal_type;
         record.pot = state.pot;
-        record.p0_committed = state.betting.p0_committed_this_round;
+        record.p0_committed = state.total_committed(Player::P0);
         record.board_index = make_board_index(game.starting_board, state.board);
         game.terminal_records.emplace_back(record);
     } else if (config_.terminal_mode == TerminalMode::ValuePrecomputed) {
@@ -295,7 +295,7 @@ void HoldemSubgameBuilder::finalize_terminal_node(
         auto record = TerminalRecord();
         record.type = state.terminal_type;
         record.pot = state.pot;
-        record.p0_committed = state.betting.p0_committed_this_round;
+        record.p0_committed = state.total_committed(Player::P0);
         record.board_index = make_board_index(game.starting_board, state.board);
         game.terminal_records.emplace_back(record);
 

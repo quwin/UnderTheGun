@@ -424,7 +424,33 @@ void test_showdown_terminal_requires_river_board() {
     std::cout << "[pass] test_showdown_terminal_requires_river_board\n";
 }
 
+void test_cross_street_contributions() {
+    auto state = make_base_river_state();
+    state.board.cards.resize(3);
+    state.pot = 1200;
+    state.betting.p0_committed_this_round = 100;
+    state.betting.p1_committed_this_round = 100;
+    auto turn = state.board;
+    turn.cards.push_back(phevaluator::Card("Jd"));
+    state = poker::holdem::make_next_street_public_state(state, turn, poker::Player::P0);
+    check(state.committed(poker::Player::P0) == 0, "Street legality resets current commitments.");
+    check(state.total_committed(poker::Player::P0) == 100, "Prior contributions survive street reset.");
+    check_near(poker::holdem::utility_p0_when_p0_loses(state), -100, kTol, "Turn fold includes flop contribution.");
+    state.betting.p0_committed_this_round = 200;
+    state.betting.p1_committed_this_round = 200;
+    state.pot = 1600;
+    auto river = state.board;
+    river.cards.push_back(phevaluator::Card("4s"));
+    state = poker::holdem::make_next_street_public_state(state, river, poker::Player::P0);
+    check_near(poker::holdem::utility_p0_when_p0_loses(state), -300, kTol, "River loss includes both earlier streets.");
+    check_near(poker::holdem::utility_p0_when_p0_wins(state), 1300, kTol, "Win subtracts all subgame contributions.");
+    check_near(poker::holdem::utility_p0_when_tie(state), 500, kTol, "Tie returns own contributions and half the initial pot.");
+    check(state.total_committed(poker::Player::P1) == 300, "Track both players across streets.");
+    std::cout << "[pass] cross-street terminal chip accounting\n";
+}
+
 void run_all_tests() {
+    test_cross_street_contributions();
     test_p1_folds_to_p0_bet_p0_wins_current_pot_minus_own_commitment();
     test_p0_folds_to_p1_bet_p0_loses_own_commitment();
     test_p0_folds_after_calling_or_raising_loses_own_commitment();
