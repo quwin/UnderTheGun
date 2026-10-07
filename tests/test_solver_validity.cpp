@@ -349,8 +349,8 @@ void test_known_single_pair_river_converges() {
     poker::PublicExploitabilityEvaluator evaluator(game, terminal_values);
     poker::CpuCfrSolver solver(game, terminal_values);
     const auto initial = evaluator.exploitability(solver.average_strategy());
-    // The current best-response evaluator maximizes per private pair. With one
-    // pair there is no hidden opponent hand, so it is a valid convergence oracle.
+    // Preserve the analytically known single-pair convergence fixture alongside
+    // the multi-hand regression below.
     solver.run_iterations(4000);
     const auto average = solver.average_strategy();
     test_support::check_strategy(game, average);
@@ -368,6 +368,31 @@ void test_known_single_pair_river_converges() {
     std::cout << "[pass] single-pair river convergence: exploitability=" << result.exploitability << '\n';
 }
 
+void test_multi_hand_river_converges() {
+    auto config = make_base_config();
+    config.betting_abstraction = make_pot_bet_no_raise_betting();
+    config.p0_range.clear();
+    config.p1_range.clear();
+    config.p0_range.set_weight(poker::make_hand(phevaluator::Card("Ah"), phevaluator::Card("Kh")), 1.0f);
+    config.p0_range.set_weight(poker::make_hand(phevaluator::Card("8c"), phevaluator::Card("6c")), 1.0f);
+    config.p1_range.set_weight(poker::make_hand(phevaluator::Card("Qc"), phevaluator::Card("Qd")), 1.0f);
+    config.p1_range.set_weight(poker::make_hand(phevaluator::Card("Jc"), phevaluator::Card("Jd")), 1.0f);
+    const auto game = poker::holdem::HoldemSubgameBuilder(config).build();
+    check(game.hand_pairs.pair_count() == 4, "Multi-hand convergence requires four legal pairs.");
+    poker::TerminalValueProvider terminals;
+    poker::PublicExploitabilityEvaluator evaluator(game, terminals);
+    poker::CpuCfrSolver solver(game, terminals);
+    const double initial = evaluator.exploitability(solver.average_strategy()).exploitability;
+    solver.run_iterations(50000);
+    const auto average = solver.average_strategy();
+    test_support::check_strategy(game, average);
+    const double final = evaluator.exploitability(average).exploitability;
+    check(initial > 100.0, "Uniform multi-hand fixture must be substantially exploitable.");
+    check(final < 5.0 && final < initial * 0.02,
+          "Multi-hand CFR must converge to low exploitability without seeing the opponent's hand.");
+    std::cout << "[pass] multi-hand river convergence: exploitability=" << final << '\n';
+}
+
 } // namespace
 
 int main() {
@@ -379,5 +404,6 @@ int main() {
         test_terminal_provider_rejects_invalid_input();
         test_river_training_has_learning_signal();
         test_known_single_pair_river_converges();
+        test_multi_hand_river_converges();
     });
 }
