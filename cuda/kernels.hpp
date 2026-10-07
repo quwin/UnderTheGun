@@ -197,6 +197,7 @@ void launch_compute_packed_showdown_result_cache(
 void launch_public_backward_pair_value_level_chunk(
     const KernelLaunchConfig& config,
     const DevicePublicLevelEdges& edges,
+    const DeviceHandData& hands,
 
     const int* d_node_type,
     const int* d_player,
@@ -261,6 +262,7 @@ void launch_public_backward_pair_value_level_chunk(
     void launch_public_forward_pair_reach_level_chunk(
         const KernelLaunchConfig& config,
         const DevicePublicLevelEdges& edges,
+        const DeviceHandData& hands,
 
         const int* d_node_type,
         const int* d_player,

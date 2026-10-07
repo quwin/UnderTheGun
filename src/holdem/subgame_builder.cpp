@@ -108,6 +108,12 @@ HoldemSubgameBuilder::HoldemSubgameBuilder(HoldemSubgameConfig  config)
             "HoldemSubgameBuilder requires board_abstraction."
         );
     }
+    if (!config_.board_abstraction->is_exact()) {
+        throw std::invalid_argument(
+            "Holdem solves require exact board transitions: suit-isomorphic runouts "
+            "need private-hand remapping, which is not implemented."
+        );
+    }
     if (!config_.hand_abstraction) {
         throw std::invalid_argument(
             "HoldemSubgameBuilder requires hand_abstraction."

@@ -93,7 +93,19 @@ struct GpuCfrStats {
 // Host-side flattened public game representation
 // -----------------------------------------------------------------------------
 
+// One group per chance parent, shared by all pairs. Uniform exact runouts
+// normalize with a card-mask popcount; weighted transitions use the edge range.
+struct PublicChanceGroup {
+    std::uint64_t card_mask = 0;
+    int first_edge = 0;
+    int edge_count = 0;
+    int uniform = 0;
+};
+
 struct FlatPublicLevelEdges {
+    std::vector<int> public_card;
+    std::vector<int> chance_group;
+    std::vector<PublicChanceGroup> chance_groups;
     std::vector<int> parent;
     std::vector<int> child;
     // For action edges:
@@ -103,7 +115,7 @@ struct FlatPublicLevelEdges {
     //   -1
     std::vector<int> local_action;
     // For chance edges:
-    //   probability of public-card transition.
+    //   board-only probability; kernels condition on private-card blockers.
     //
     // For action edges:
     //   1.0
@@ -258,6 +270,9 @@ void flatten_terminal_data_for_gpu(
 // -----------------------------------------------------------------------------
 
 struct DevicePublicLevelEdges {
+    int* d_public_card = nullptr;
+    int* d_chance_group = nullptr;
+    PublicChanceGroup* d_chance_groups = nullptr;
     int* d_parent = nullptr;
     int* d_child = nullptr;
 

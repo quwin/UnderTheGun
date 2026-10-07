@@ -371,7 +371,10 @@ __device__ float terminal_utility_from_record_and_cache_p0(
     }
     const auto showdown_pair_count = static_cast<std::size_t>(showdown_hand_pair_count);
     const auto pair_id = static_cast<std::size_t>(global_pair_id);
-    if (terminal_type == TerminalType::Showdown || board_index > kNumCards) {
+    const bool river_board = start_board_size == 5 ||
+        (start_board_size == 4 && board_index > 0) ||
+        (start_board_size == 3 && board_index >= 53);
+    if (terminal_type == TerminalType::Showdown || river_board) {
         const std::size_t result_index = static_cast<std::size_t>(board_index) * showdown_pair_count + pair_id;
         const unsigned int code = unpack_showdown_result_2bit(showdown_words,result_index);
         return utility_from_showdown_code_p0(code, pot, p0_committed);
@@ -379,43 +382,26 @@ __device__ float terminal_utility_from_record_and_cache_p0(
     if (terminal_type == TerminalType::AllIn) {
         float running_utility = 0.0f;
         int valid_boards = 0;
-        // All-in on flop.
-        // Loops all possible turn+river BoardIndex values.
-        if (start_board_size == 3) {
-            #pragma unroll
-            for (std::size_t final_board_index{1}; final_board_index < kBoardIndexCount; ++final_board_index) {
-                const std::size_t result_index = final_board_index * showdown_pair_count + pair_id;
-                const unsigned int code = unpack_showdown_result_2bit(showdown_words, result_index);
-                if (code == kShowdownInvalid) {
-                    continue;
-                }
-                running_utility += utility_from_showdown_code_p0(
-                    code,
-                    pot,
-                    p0_committed
-                );
+        // BoardIndex is relative to the starting board, not the current street.
+        // A turn all-in reached from a flop must keep its observed turn fixed.
+        if (start_board_size == 3 && board_index == 0) {
+            for (int final_board_index = 53; final_board_index < kBoardIndexCount; ++final_board_index) {
+                const auto code = unpack_showdown_result_2bit(showdown_words,
+                    static_cast<std::size_t>(final_board_index) * showdown_pair_count + pair_id);
+                if (code == kShowdownInvalid) continue;
+                running_utility += utility_from_showdown_code_p0(code, pot, p0_committed);
                 ++valid_boards;
             }
-        }
-        // All-in on turn
-        else if (start_board_size == 4) {
-            const int known_extra_card = static_cast<int>(board_index) - 1;
-            #pragma unroll
-            for (int river_card{0}; river_card < kNumCards; ++river_card) {
-                if (river_card == known_extra_card) {
-                    continue;
-                }
-                const int final_board_index = two_card_board_index_device(known_extra_card, river_card);
-                const std::size_t result_index = static_cast<std::size_t>(final_board_index) * showdown_pair_count + pair_id;
-                const unsigned int code = unpack_showdown_result_2bit(showdown_words,result_index);
-                if (code == kShowdownInvalid) {
-                    continue;
-                }
-                running_utility += utility_from_showdown_code_p0(
-                    code,
-                    pot,
-                    p0_committed
-                );
+        } else {
+            const int known_turn = static_cast<int>(board_index) - 1;
+            for (int river = 0; river < kNumCards; ++river) {
+                if (start_board_size == 3 && river == known_turn) continue;
+                const int final_board_index = start_board_size == 4
+                    ? river + 1 : two_card_board_index_device(known_turn, river);
+                const auto code = unpack_showdown_result_2bit(showdown_words,
+                    static_cast<std::size_t>(final_board_index) * showdown_pair_count + pair_id);
+                if (code == kShowdownInvalid) continue;
+                running_utility += utility_from_showdown_code_p0(code, pot, p0_committed);
                 ++valid_boards;
             }
         }
@@ -1003,6 +989,28 @@ void launch_compute_terminal_pair_values_from_records_chunk(
         d_node_pair_value_p0
     );
 }
+// Pair-conditioned public chance without an edge-by-pair probability table.
+__device__ float conditioned_chance_probability(
+    int edge, int pair, const int* cards, const int* group_indices,
+    const PublicChanceGroup* groups, const float* weights, const DeviceHandData& hands
+) {
+    const int p0 = hands.d_p0_pair_index[pair];
+    const int p1 = hands.d_p1_pair_index[pair];
+    const unsigned long long private_cards =
+        (1ULL << hands.d_p0_hand_card0[p0]) | (1ULL << hands.d_p0_hand_card1[p0]) |
+        (1ULL << hands.d_p1_hand_card0[p1]) | (1ULL << hands.d_p1_hand_card1[p1]);
+    if (private_cards & (1ULL << cards[edge])) return 0.0f;
+    const auto group = groups[group_indices[edge]];
+    if (group.uniform) {
+        const int legal = __popcll(group.card_mask & ~private_cards);
+        return legal > 0 ? 1.0f / legal : 0.0f;
+    }
+    float legal_mass = 0.0f;
+    for (int i = group.first_edge; i < group.first_edge + group.edge_count; ++i)
+        if (!(private_cards & (1ULL << cards[i]))) legal_mass += weights[i];
+    return legal_mass > 0.0f ? weights[edge] / legal_mass : 0.0f;
+}
+
 __global__ void public_backward_pair_value_level_chunk_kernel(
     int edge_count,
 
@@ -1010,6 +1018,10 @@ __global__ void public_backward_pair_value_level_chunk_kernel(
     const int* __restrict__ d_edge_child,
     const int* __restrict__ d_edge_local_action,
     const float* __restrict__ d_edge_chance_prob,
+    const int* d_edge_public_card,
+    const int* d_edge_chance_group,
+    const PublicChanceGroup* d_chance_groups,
+    DeviceHandData hands,
 
     const int* __restrict__ d_node_type,
     const int* __restrict__ d_player,
@@ -1056,7 +1068,10 @@ __global__ void public_backward_pair_value_level_chunk_kernel(
     float edge_weight = 1.0f;
 
     if (parent_player == static_cast<int>(Player::Chance)) {
-        edge_weight = d_edge_chance_prob[edge_i];
+        edge_weight = conditioned_chance_probability(
+            edge_i, global_pair, d_edge_public_card, d_edge_chance_group,
+            d_chance_groups, d_edge_chance_prob, hands
+        );
     } else if (
         parent_player == static_cast<int>(Player::P0) ||
         parent_player == static_cast<int>(Player::P1)
@@ -1191,6 +1206,7 @@ void launch_compute_packed_showdown_result_cache(
     void launch_public_backward_pair_value_level_chunk(
         const KernelLaunchConfig& config,
         const DevicePublicLevelEdges& edges,
+        const DeviceHandData& hands,
 
         const int* d_node_type,
         const int* d_player,
@@ -1239,6 +1255,10 @@ void launch_compute_packed_showdown_result_cache(
         edges.d_child,
         edges.d_local_action,
         edges.d_chance_prob,
+        edges.d_public_card,
+        edges.d_chance_group,
+        edges.d_chance_groups,
+        hands,
 
         d_node_type,
         d_player,
@@ -1337,6 +1357,10 @@ __global__ void public_forward_pair_reach_level_chunk_kernel(
     const int* __restrict__ d_edge_child,
     const int* __restrict__ d_edge_local_action,
     const float* __restrict__ d_edge_chance_prob,
+    const int* d_edge_public_card,
+    const int* d_edge_chance_group,
+    const PublicChanceGroup* d_chance_groups,
+    DeviceHandData hands,
 
     const int* __restrict__ d_node_type,
     const int* __restrict__ d_player,
@@ -1401,7 +1425,10 @@ __global__ void public_forward_pair_reach_level_chunk_kernel(
         d_node_pair_reach_chance[parent_idx];
 
     if (parent_player == static_cast<int>(Player::Chance)) {
-        const float chance_prob = d_edge_chance_prob[edge_i];
+        const float chance_prob = conditioned_chance_probability(
+            edge_i, global_pair, d_edge_public_card, d_edge_chance_group,
+            d_chance_groups, d_edge_chance_prob, hands
+        );
 
         d_node_pair_reach_p0[child_idx] =
             parent_reach_p0;
@@ -1481,6 +1508,7 @@ __global__ void public_forward_pair_reach_level_chunk_kernel(
 void launch_public_forward_pair_reach_level_chunk(
     const KernelLaunchConfig& config,
     const DevicePublicLevelEdges& edges,
+    const DeviceHandData& hands,
 
     const int* d_node_type,
     const int* d_player,
@@ -1530,6 +1558,10 @@ void launch_public_forward_pair_reach_level_chunk(
         edges.d_child,
         edges.d_local_action,
         edges.d_chance_prob,
+        edges.d_public_card,
+        edges.d_chance_group,
+        edges.d_chance_groups,
+        hands,
 
         d_node_type,
         d_player,
@@ -1722,7 +1754,7 @@ __global__ void aggregate_state_bucket_reaches_chunk_kernel(
 
     atomicAdd(
         &d_state_bucket_own_reach[state_bucket_idx],
-        own_reach
+        own_reach * d_node_pair_reach_chance[node_pair_idx]
     );
 }
     void launch_public_aggregate_state_bucket_reaches_chunk(

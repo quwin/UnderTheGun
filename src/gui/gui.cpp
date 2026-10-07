@@ -457,7 +457,7 @@ class Wizard : public Fl_Double_Window {
     config.p1_range = villain_range;
     config.betting_abstraction = make_gui_betting_abstraction();
     config.collapse_all_in_runouts_to_ev = true;
-    config.board_abstraction = poker::holdem::make_isomorphic_board_abstraction(config.p0_range, config.p1_range);
+    config.board_abstraction = poker::holdem::make_exact_board_abstraction();
     const int total = std::max<int>(0, m_data.iterations);
     const int chunk = std::max<int>(1, total / 100);
 

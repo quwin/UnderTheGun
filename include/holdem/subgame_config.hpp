@@ -84,7 +84,8 @@ struct HoldemSubgameConfig {
         make_exact_hand_abstraction();
     // Exact by default.
     //
-    // Public-board abstraction affects public chance transitions only.
+    // Solves currently require exact transitions. Suit compression needs
+    // private-hand remapping before it can preserve pair-conditioned values.
     std::shared_ptr<const BoardAbstraction> board_abstraction = make_exact_board_abstraction();
     // ---------------------------------------------------------------------
     // All-in handling
