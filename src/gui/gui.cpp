@@ -499,7 +499,6 @@ class Wizard : public Fl_Double_Window {
 
         m_average_strategy = solver.average_strategy();
     } else {
-      config.terminal_mode = poker::TerminalMode::ValuePrecomputed;
       const std::size_t availableMemory = MemoryUtil::getAvailableMemory();
       m_pg5->setMemoryEstimate( sizeof(poker::Game) + config.memoryEstimate(), availableMemory);
       Fl::check();

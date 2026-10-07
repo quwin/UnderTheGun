@@ -176,10 +176,9 @@ void print_result(const BenchResult& r) {
 }
 
 BenchResult run_cpu_benchmark(
-    poker::holdem::HoldemSubgameConfig& build_config,
+    const poker::holdem::HoldemSubgameConfig& build_config,
     int iterations
 ) {
-    build_config.terminal_mode = poker::TerminalMode::ValuePrecomputed;
     const auto t0 = Clock::now();
     const poker::Game game_tree = poker::holdem::HoldemSubgameBuilder(build_config).build();
 

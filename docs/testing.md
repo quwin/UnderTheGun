@@ -23,6 +23,9 @@ they do not depend on the test process's working directory.
   contiguous strategy tensors, and terminal payoff dimensions.
 - Analytical check-only river EV: P0 wins all four private matchups, giving an EV
   of 1000 chips under the project's utility convention.
+- Default record-computed CPU river EV; analytical record payoffs for wins,
+  losses, ties, folds and pre-river all-ins. Record/precomputed payoff and CPU
+  traversal parity across river, turn and flop, including decoded runouts.
 - Multi-hand CPU learning and normalized strategies; convergence in a known
   single-pair river game.
 - GPU flattening, root learning signals, and CPU/GPU average strategy and EV
@@ -35,11 +38,14 @@ public runouts. Timing benchmarks belong outside correctness tests.
 
 ## Current limits
 
-CPU tests explicitly build `ValuePrecomputed` terminals. CPU/GPU agreement tests
-build `DebugComputed` games containing both terminal representations, then run
+The CPU terminal provider supports both `ValuePrecomputed` and `RecordComputed`
+games. The GUI CPU path uses the default `RecordComputed` configuration, with
+lazy board decoding and an all-in equity cache instead of a dense payoff table.
+CPU/GPU agreement tests build `DebugComputed` games containing both terminal
+representations, then run
 the GPU in `RecordComputed` mode. The current chunked GPU traversal does not
-implement `ValuePrecomputed` terminal loading. These tests do not establish that
-the GUI's default CPU path supports record-computed terminals.
+implement `ValuePrecomputed` terminal loading. The default CPU record-mode
+regression checks the solver path used by the GUI; it does not automate GUI clicks.
 
 The current best-response evaluator maximizes separately for each private hand
 pair. It can use knowledge of the opponent's hand, so its exploitability result

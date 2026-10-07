@@ -94,7 +94,6 @@ struct HoldemSubgameConfig {
     //
     // Is not used if terminal_mode = TerminalMode::RecordComputed
     bool collapse_all_in_runouts_to_ev = true;
-    // TODO: Add TerminalMode::RecordComputed support to CPU CFR.
     TerminalMode terminal_mode = TerminalMode::RecordComputed;
     // ---------------------------------------------------------------------
     // Validation
