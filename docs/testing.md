@@ -79,3 +79,7 @@ small fixtures. They do not establish convergence for arbitrary large flop
 games or validate every betting abstraction. The GPU's `last_root_value_p0`
 stats field remains unpopulated; tests check its learning signals and evaluate
 its returned policies through the independently checked profile evaluator.
+
+Cross-street chip tests preserve completed-street contributions while resetting
+street-local call/raise commitments, and check fold/loss/win/tie utilities plus
+record-computed CPU/GPU learning after a non-all-in turn bet and river fold.

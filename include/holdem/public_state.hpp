@@ -25,6 +25,16 @@ struct PublicState {
     Player player_to_act = Player::P0;
     // Per-street betting state.
     BettingState betting;
+    // Contributions since the subgame root on completed streets. Street-local
+    // commitments remain separate for call/raise legality.
+    int p0_committed_previous_streets = 0;
+    int p1_committed_previous_streets = 0;
+
+    [[nodiscard]] int total_committed(Player player) const {
+        if (player == Player::P0) return p0_committed_previous_streets + committed(player);
+        if (player == Player::P1) return p1_committed_previous_streets + committed(player);
+        throw std::invalid_argument("total_committed requires P0 or P1.");
+    }
     // ---------------------------------------------------------------------
     // Terminal state
     // ---------------------------------------------------------------------
@@ -132,6 +142,8 @@ struct PublicState {
         board = std::move(new_board);
         player_to_act = first_to_act;
 
+        p0_committed_previous_streets += betting.p0_committed_this_round;
+        p1_committed_previous_streets += betting.p1_committed_this_round;
         betting = BettingState{};
 
         terminal_type = TerminalType::None;

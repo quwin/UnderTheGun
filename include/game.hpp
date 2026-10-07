@@ -65,6 +65,7 @@ struct TerminalRecord {
     TerminalType type;
     BoardIndex board_index;
     int pot;
+    // Total P0 contribution since the subgame root, including completed streets.
     int p0_committed;
 };
 

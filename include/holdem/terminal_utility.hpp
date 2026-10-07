@@ -22,19 +22,19 @@ namespace poker::holdem {
 // Subgame-net convention:
 //
 //   P0 wins pot:
-//     +pot - p0_committed_this_round
+//     +pot - p0_total_subgame_contribution
 //
 //   P0 loses at showdown:
-//     -p0_committed_this_round
+//     -p0_total_subgame_contribution
 //
 //   P0 folds:
-//     -p0_committed_this_round
+//     -p0_total_subgame_contribution
 //
 //   P1 folds:
-//     +pot - p0_committed_this_round
+//     +pot - p0_total_subgame_contribution
 //
 //   Tie:
-//     p0_share_of_pot - p0_committed_this_round
+//     p0_share_of_pot - p0_total_subgame_contribution
 //
 // This treats the starting pot as contestable value rather than as already
 // owned by either player.
@@ -43,7 +43,7 @@ inline float utility_p0_when_p0_wins(
     const PublicState& state
 ) {
     return static_cast<float>(
-        state.pot - state.betting.p0_committed_this_round
+        state.pot - state.total_committed(Player::P0)
     );
 }
 
@@ -51,7 +51,7 @@ inline float utility_p0_when_p0_loses(
     const PublicState& state
 ) {
     return static_cast<float>(
-        -state.betting.p0_committed_this_round
+        -state.total_committed(Player::P0)
     );
 }
 
@@ -63,7 +63,7 @@ inline float utility_p0_when_tie(
 
     return static_cast<float>(
         half_pot -
-        static_cast<double>(state.betting.p0_committed_this_round)
+        static_cast<double>(state.total_committed(Player::P0))
     );
 }
 
