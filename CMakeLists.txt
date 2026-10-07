@@ -285,6 +285,10 @@ set_target_properties(UnderTheGunBenchmark
 
 enable_testing()
 
+add_executable(test_exploitability tests/test_exploitability.cpp)
+target_link_libraries(test_exploitability PRIVATE kuhn_gpu_cfr_lib)
+add_test(NAME test_exploitability COMMAND test_exploitability)
+
 add_executable(test_solver_validity
         tests/test_solver_validity.cpp
 )

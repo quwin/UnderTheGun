@@ -26,8 +26,12 @@ they do not depend on the test process's working directory.
 - Default record-computed CPU river EV; analytical record payoffs for wins,
   losses, ties, folds and pre-river all-ins. Record/precomputed payoff and CPU
   traversal parity across river, turn and flop, including decoded runouts.
-- Multi-hand CPU learning and normalized strategies; convergence in a known
-  single-pair river game.
+- Multi-hand CPU learning and normalized strategies; convergence in both a known
+  single-pair river game and a river game with hidden two-hand ranges.
+- Best-response information privacy for both players, pair weights, zero-weight
+  hands, public chance, and opponent-action-conditioned beliefs. Small synthetic
+  games are checked against exhaustive pure-policy enumeration, and returned
+  best-response policies are replayed to verify their reported values.
 - GPU flattening, root learning signals, and CPU/GPU average strategy and EV
   agreement after one and 500 iterations. The agreement fixture forces two-pair
   chunks to exercise accumulation across chunks.
@@ -47,11 +51,11 @@ the GPU in `RecordComputed` mode. The current chunked GPU traversal does not
 implement `ValuePrecomputed` terminal loading. The default CPU record-mode
 regression checks the solver path used by the GUI; it does not automate GUI clicks.
 
-The current best-response evaluator maximizes separately for each private hand
-pair. It can use knowledge of the opponent's hand, so its exploitability result
-is not a valid equilibrium oracle for a multi-hand range. The convergence test
-uses exactly one pair, where this information problem does not arise. Multi-hand
-tests check learning, normalization, and CPU/GPU agreement instead.
+The best-response evaluator chooses one action per public decision and own-hand
+bucket. It aggregates compatible opponent hands using pair probabilities and
+opponent/chance reach, excluding the responder's own submitted strategy. This
+supports multi-hand exploitability within the current exact-hand public-tree
+representation. Values still depend on the game's terminal and chance semantics.
 
 Turn/flop tests verify the public-tree representation and public chance
 distribution. They do not establish correct private-card-conditioned runout
