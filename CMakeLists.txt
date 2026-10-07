@@ -210,6 +210,7 @@ add_library(kuhn_gpu_cfr_lib
 
         src/cfr_cpu.cpp
         src/exploitability.cpp
+        src/terminal_value.cpp
         src/cfr_gpu.cpp
 
         src/holdem/betting_engine.cpp
