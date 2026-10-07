@@ -293,6 +293,7 @@ void Game::set_hand_domains(
         }
     }
 
+    pairs.validate_weights();
     p0_hands = std::move(p0);
     p1_hands = std::move(p1);
     hand_pairs = std::move(pairs);
@@ -395,7 +396,7 @@ GameMemory Game::estimate_memory() const {
     estimate.action_state_bytes = sizeof(ActionState) * action_states.size();
     estimate.p0_hand_bytes = sizeof(HandId) * p0_hands.hands.size();
     estimate.p1_hand_bytes = sizeof(HandId) * p1_hands.hands.size();
-    estimate.hand_pair_bytes =sizeof(int) * (hand_pairs.p0_index.size() +hand_pairs.p1_index.size());
+    estimate.hand_pair_bytes =sizeof(int) * (hand_pairs.p0_index.size() +hand_pairs.p1_index.size()) + sizeof(double) * hand_pairs.weights.size();
 
     estimate.terminal_value_p0_bytes = sizeof(float) * terminal_value_p0.size();
     estimate.terminal_node_bytes = sizeof(TerminalRecord) * terminal_records.size();
@@ -433,6 +434,7 @@ GameMemory Game::estimate_memory() const {
         vector_bytes_capacity(p1_hands.hands) +
         vector_bytes_capacity(hand_pairs.p0_index) +
         vector_bytes_capacity(hand_pairs.p1_index) +
+        vector_bytes_capacity(hand_pairs.weights) +
         vector_bytes_capacity(terminal_value_p0) +
         vector_bytes_capacity(terminal_records);
     return estimate;
@@ -672,6 +674,7 @@ void Game::validate() const {
         }
     }
 
+    hand_pairs.validate_weights();
     if (hand_pairs.p0_index.size() != hand_pairs.p1_index.size()) {
         throw std::invalid_argument(
             "HandPairTable p0_index and p1_index size mismatch."

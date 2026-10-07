@@ -212,6 +212,8 @@ struct FlatHandData {
     //   p1_index = p1_pair_index[k]
     std::vector<int> p0_pair_index;
     std::vector<int> p1_pair_index;
+    // Range probabilities multiplied by pair_count (uniform weights stay 1).
+    std::vector<float> pair_weight;
 
     // Current exact-domain mode:
     //
@@ -363,6 +365,7 @@ struct DeviceHandData {
 
     int* d_p0_pair_index = nullptr;
     int* d_p1_pair_index = nullptr;
+    float* d_pair_weight = nullptr;
 
     int* d_p0_bucket_by_hand_index = nullptr;
     int* d_p1_bucket_by_hand_index = nullptr;

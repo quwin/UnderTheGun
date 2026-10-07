@@ -4,6 +4,7 @@
 #include "poker/hand.hpp"
 
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -161,6 +162,27 @@ struct HandPairTable {
     //   p1_domain.hands
     std::vector<int> p0_index;
     std::vector<int> p1_index;
+    // Optional unnormalized range-product weights. Empty means uniform for
+    // manually constructed games and backwards-compatible fixtures.
+    std::vector<double> weights;
+
+    [[nodiscard]] double weight(int pair) const {
+        if (pair < 0 || pair >= pair_count()) throw std::out_of_range("Hand pair out of range.");
+        return weights.empty() ? 1.0 : weights.at(pair);
+    }
+    void validate_weights() const {
+        if (weights.empty()) return;
+        if (weights.size() != p0_index.size())
+            throw std::invalid_argument("Pair weights must match pair count.");
+        double sum = 0.0;
+        for (double weight : weights) {
+            if (!std::isfinite(weight) || weight < 0.0)
+                throw std::invalid_argument("Pair weights must be finite and nonnegative.");
+            sum += weight;
+        }
+        if (!std::isfinite(sum) || sum <= 0.0)
+            throw std::invalid_argument("Pair weights must have positive finite mass.");
+    }
 
     [[nodiscard]] int pair_count() const {
         return static_cast<int>(p0_index.size());

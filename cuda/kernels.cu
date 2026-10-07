@@ -1291,6 +1291,8 @@ __global__ void initialize_public_pair_reaches_chunk_kernel(
     int root,
     int active_pair_count,
     int pair_chunk_size,
+    int pair_start,
+    const float* d_pair_weight,
 
     float* __restrict__ d_node_pair_reach_p0,
     float* __restrict__ d_node_pair_reach_p1,
@@ -1310,7 +1312,7 @@ __global__ void initialize_public_pair_reaches_chunk_kernel(
 
     d_node_pair_reach_p0[idx] = 1.0f;
     d_node_pair_reach_p1[idx] = 1.0f;
-    d_node_pair_reach_chance[idx] = 1.0f;
+    d_node_pair_reach_chance[idx] = d_pair_weight[pair_start + local_pair];
 }
 
     void launch_initialize_public_pair_reaches_chunk(
@@ -1319,6 +1321,8 @@ __global__ void initialize_public_pair_reaches_chunk_kernel(
         int root,
         int active_pair_count,
         int pair_chunk_size,
+        int pair_start,
+        const float* d_pair_weight,
 
         float* d_node_pair_reach_p0,
         float* d_node_pair_reach_p1,
@@ -1344,6 +1348,8 @@ __global__ void initialize_public_pair_reaches_chunk_kernel(
         root,
         active_pair_count,
         pair_chunk_size,
+        pair_start,
+        d_pair_weight,
 
         d_node_pair_reach_p0,
         d_node_pair_reach_p1,

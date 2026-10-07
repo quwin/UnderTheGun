@@ -253,6 +253,8 @@ void launch_public_backward_pair_value_level_chunk(
         int root,
         int active_pair_count,
         int pair_chunk_size,
+        int pair_start,
+        const float* d_pair_weight,
         float* d_node_pair_reach_p0,
         float* d_node_pair_reach_p1,
         float* d_node_pair_reach_chance,

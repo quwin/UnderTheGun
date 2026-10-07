@@ -83,3 +83,7 @@ its returned policies through the independently checked profile evaluator.
 Cross-street chip tests preserve completed-street contributions while resetting
 street-local call/raise commitments, and check fold/loss/win/tie utilities plus
 record-computed CPU/GPU learning after a non-all-in turn bet and river fold.
+
+Range-product weights are retained for each legal hand pair and used by default
+in CPU training, GPU counterfactual/average reach, and profile/best-response
+evaluation. Empty weights on manually built games continue to mean uniform.
