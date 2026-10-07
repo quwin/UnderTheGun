@@ -86,6 +86,11 @@ inline InfoSetKey make_infoset_key(
 
     key.player = player;
     key.board = public_state.board;
+    key.private_hand_bucket = ExactHandAbstraction{}.bucket_for(
+        player,
+        player == Player::P0 ? private_state.p0_hand : private_state.p1_hand,
+        public_state.board
+    );
 
     key.pot = public_state.pot;
     key.p0_stack = public_state.p0_stack;

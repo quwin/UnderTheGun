@@ -1,479 +1,108 @@
-#include "game.hpp"
-
-#include "holdem/betting_abstraction.hpp"
-#include "holdem/subgame_builder.hpp"
-#include "holdem/subgame_config.hpp"
-#include "holdem/street.hpp"
-#include "exploitability.hpp"
-#include "kuhn_builder.hpp"
-
-#include "poker/board.hpp"
-#include "poker/range.hpp"
-
-#include <algorithm>
-#include <cmath>
-#include <cstdlib>
-#include <exception>
-#include <iostream>
-#include <map>
-#include <set>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <vector>
-
+#include "test_support.hpp"
 #include "cfr_cpu.hpp"
 #include "cfr_gpu.hpp"
 
+using namespace test_support;
+
 namespace {
-    void check(bool condition, const std::string& message) {
-        if (!condition) {
-            throw std::runtime_error(message);
-        }
+
+void test_flattening(const poker::Game& game) {
+    poker::FlatTerminalData terminals;
+    const auto flat = poker::flatten_public_game_for_gpu(game, terminals);
+    poker::flatten_terminal_data_for_gpu(game, terminals, poker::TerminalMode::ValuePrecomputed);
+    const auto hands = poker::flatten_hand_data_for_gpu(game);
+    check(flat.num_nodes == game.num_nodes() && flat.num_edges == game.num_edges() &&
+              flat.num_action_states == game.num_action_states() && flat.root == game.root &&
+              flat.tensor_entries == game.cfr_tensor_entries(),
+          "Flattening must preserve game dimensions.");
+    for (int id = 0; id < game.num_nodes(); ++id) {
+        const auto& node = game.node(id);
+        check(flat.player.at(id) == static_cast<int>(node.player) &&
+                  flat.node_type.at(id) == static_cast<int>(node.type) &&
+                  flat.action_state_index.at(id) == node.action_state_index,
+              "Flattened node metadata mismatch.");
+        // Terminal connectivity is represented by incoming edges and the
+        // terminal lookup; only nonterminals carry parent/depth arrays.
+        if (node.type != poker::PublicNodeType::Terminal)
+            check(flat.parent.at(id) == node.parent && flat.depth.at(id) == node.depth,
+                  "Flattened nonterminal connectivity mismatch.");
     }
-
-    void check_eq(
-        int actual,
-        int expected,
-        const std::string& message
-    ) {
-        if (actual != expected) {
-            std::ostringstream oss;
-            oss << message
-                << " actual=" << actual
-                << " expected=" << expected;
-            throw std::runtime_error(oss.str());
-        }
-    }
-
-    void check_near(
-        double actual,
-        double expected,
-        double tolerance,
-        const std::string& message
-    ) {
-        if (std::abs(actual - expected) > tolerance) {
-            std::ostringstream oss;
-            oss << message
-                << " actual=" << actual
-                << " expected=" << expected
-                << " tolerance=" << tolerance;
-            throw std::runtime_error(oss.str());
-        }
-    }
-    void check_strategy_is_normalized_by_infoset(
-        const poker::Game& game,
-        const std::vector<float>& strategy,
-        double tolerance,
-        const std::string& label
-    ) {
-        check(
-            static_cast<int>(strategy.size()) == game.num_q(),
-            label + ": strategy size should equal game.num_q()."
-        );
-
-        for (const poker::InfoSet& infoset : game.infosets) {
-            double sum = 0.0;
-
-            for (int q : infoset.q_indices) {
-                check(q >= 0 && q < static_cast<int>(strategy.size()),
-                      label + ": q index out of range.");
-
-                check(std::isfinite(strategy[q]),
-                      label + ": strategy probability is not finite.");
-
-                check(strategy[q] >= -tolerance,
-                      label + ": strategy probability is negative.");
-
-                check(strategy[q] <= 1.0 + tolerance,
-                      label + ": strategy probability is greater than one.");
-
-                sum += static_cast<double>(strategy[q]);
+    std::size_t action_edges = 0;
+    std::size_t all_edges = 0;
+    for (const auto& level : flat.level_edges) {
+        for (int e = 0; e < level.size(); ++e) {
+            const auto& parent = game.node(level.parent.at(e));
+            bool found = false;
+            for (int local = 0; local < parent.edge_count; ++local) {
+                const auto& edge = game.edge(parent.first_edge + local);
+                if (edge.child == level.child.at(e)) {
+                    check(level.local_action.at(e) == edge.local_action &&
+                              level.chance_prob.at(e) == edge.chance_prob,
+                          "Flattened edge metadata mismatch.");
+                    found = true;
+                }
             }
-
-            check_near(
-                sum,
-                1.0,
-                tolerance,
-                label + ": probabilities should sum to one within each infoset."
-            );
+            check(found, "Flattened edge is absent from game.");
+            ++all_edges;
         }
     }
-    double max_abs_diff(
-        const std::vector<float>& a,
-        const std::vector<float>& b
-    ) {
-            check(a.size() == b.size(), "Cannot compare strategies of different size.");
-
-            double max_diff = 0.0;
-
-            for (std::size_t i = 0; i < a.size(); ++i) {
-                max_diff = std::max(
-                    max_diff,
-                    std::abs(static_cast<double>(a[i]) - static_cast<double>(b[i]))
-                );
-            }
-
-            return max_diff;
-        }
-
-    poker::Board make_test_river_board() {
-        return poker::Board{
-            {
-                phevaluator::Card("As"),
-                phevaluator::Card("7h"),
-                phevaluator::Card("Jh"),
-                phevaluator::Card("Ts"),
-                phevaluator::Card("4s"),
-            }
-        };
+    for (const auto& state : game.action_states) action_edges += state.action_count;
+    check(all_edges == game.edges.size() && flat.action_edge_parent.size() == action_edges,
+          "Flattening must preserve all edges.");
+    check(hands.p0_pair_index == game.hand_pairs.p0_index &&
+              hands.p1_pair_index == game.hand_pairs.p1_index &&
+              hands.hand_pair_count == game.hand_pairs.pair_count(),
+          "Flattening must preserve private hand pairs.");
+    check(terminals.terminal_value_p0 == game.terminal_value_p0,
+          "Flattening must preserve terminal payoffs.");
+    for (int t = 0; t < terminals.terminal_count(); ++t) {
+        const int id = terminals.terminal_nodes.at(t);
+        check(game.node(id).type == poker::PublicNodeType::Terminal &&
+                  terminals.terminal_index_by_node.at(id) == t,
+              "Terminal lookup must round-trip.");
     }
-
-    poker::Range make_tiny_p0_range() {
-        poker::Range range;
-        range.clear();
-
-        range.set_weight(
-            poker::make_hand(
-            phevaluator::Card("Kh"),
-            phevaluator::Card("Qh")
-            ),
-            1.0f
-        );
-
-        range.set_weight(
-            poker::make_hand(
-                phevaluator::Card("Ks"),
-                phevaluator::Card("Kd")
-            ),
-            1.0f
-        );
-
-        return range;
-    }
-
-    poker::Range make_tiny_p1_range() {
-        poker::Range range;
-        range.clear();
-
-        range.set_weight(
-            poker::make_hand(
-                phevaluator::Card("Qc"),
-                phevaluator::Card("Qd")
-            ),
-            1.0f
-        );
-
-        range.set_weight(
-            poker::make_hand(
-                phevaluator::Card("9h"),
-                phevaluator::Card("Th")
-            ),
-            1.0f
-        );
-
-        return range;
-    }
-
-    poker::holdem::BettingAbstraction make_tiny_betting_abstraction() {
-        poker::holdem::BettingAbstraction abstraction;
-
-        // Tiny structural tree:
-        //
-        // Unopened:
-        //   check
-        //   bet pot
-        //
-        // Facing bet:
-        //   fold
-        //   call
-        //
-        // No raises.
-        abstraction.first_bet_sizes = {
-            poker::holdem::BetSize::pot_fraction(1.0)
-        };
-
-        abstraction.raise_sizes = {};
-        abstraction.max_raises_per_street = 0;
-
-        return abstraction;
-    }
-
-    poker::holdem::HoldemSubgameConfig make_test_config() {
-        poker::holdem::HoldemSubgameConfig config;
-
-        config.start_street = poker::holdem::Street::River;
-        config.board = make_test_river_board();
-
-        config.pot_size = 1000;
-        config.effective_stack = 2000;
-        config.player_to_act = poker::Player::P0;
-
-        config.p0_range = make_tiny_p0_range();
-        config.p1_range = make_tiny_p1_range();
-
-        config.betting_abstraction = make_tiny_betting_abstraction();
-
-        return config;
-    }
-
-    poker::Game build_test_game() {
-        const poker::holdem::HoldemSubgameConfig config = make_test_config();
-        return poker::holdem::HoldemSubgameBuilder(config).build();
-    }
-
-    int count_terminal_nodes(const poker::Game& game) {
-        int count = 0;
-
-        for (const poker::Node& node : game.nodes) {
-            if (node.terminal) {
-                ++count;
-            }
-        }
-
-        return count;
-    }
-
-    int count_nodes_with_player(
-        const poker::Game& game,
-        poker::Player player
-    ) {
-        int count = 0;
-
-        for (const poker::Node& node : game.nodes) {
-            if (node.player == player) {
-                ++count;
-            }
-        }
-
-        return count;
-    }
-
-    bool has_action_type(const poker::InfoSet& infoset, poker::holdem::ActionType action_type) {
-        for (const poker::GameAction action : infoset.actions) {
-            if (action.action_type == static_cast<int>(action_type)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    void test_holdem_subgame_flattens_for_gpu() {
-        poker::Game game = build_test_game();
-
-        poker::FlatGame flat = poker::flatten_game_for_gpu(game);
-
-        check(flat.valid_basic_shape(), "FlatGame should have valid basic shape.");
-        check(flat.num_nodes == game.num_nodes(), "Flat node count mismatch.");
-        check(flat.num_infosets == game.num_infosets(), "Flat infoset count mismatch.");
-        check(flat.num_q == game.num_q(), "Flat q count mismatch.");
-        check(flat.root == game.root, "Flat root mismatch.");
-
-        for (const poker::InfoSet& infoset : game.infosets) {
-            check(!infoset.actions.empty(), "Infoset should have actions.");
-            check(
-                infoset.actions.size() == infoset.q_indices.size(),
-                "Infoset actions and q_indices should align."
-            );
-
-            for (int i = 0; i < static_cast<int>(infoset.q_indices.size()); ++i) {
-                check(
-                    infoset.q_indices[i] == infoset.q_indices.front() + i,
-                    "Infoset q_indices must be contiguous for GPU."
-                );
-            }
-        }
-        std::cout << "[pass] test_holdem_subgame_flattens_for_gpu\n";
-    }
-
-    void test_holdem_subgame_runs_one_gpu_iteration() {
-        poker::Game game = build_test_game();
-
-        poker::GpuCfrConfig config;
-        config.synchronize_each_iteration = true;
-
-        poker::GpuCfrSolver solver(game, config);
-        solver.run_one_iteration();
-
-        check(
-            solver.stats().iterations_run == 1,
-            "GPU solver should run one iteration."
-        );
-
-        std::vector<float> avg = solver.average_strategy();
-
-        check(
-            static_cast<int>(avg.size()) == game.num_q(),
-            "Average strategy size should match game.num_q()."
-        );
-        std::cout << "[pass] test_holdem_subgame_runs_one_gpu_iteration\n";
-    }
-
-    void test_cpu_gpu_one_iteration_average_strategy_close() {
-        const poker::Game game = poker::KuhnGameBuilder().build();
-
-        poker::CfrConfig cpu_config;
-        cpu_config.use_cfr_plus = false;
-        cpu_config.linear_averaging = false;
-
-        poker::GpuCfrConfig gpu_config;
-        gpu_config.use_cfr_plus = false;
-        gpu_config.linear_averaging = false;
-        gpu_config.synchronize_each_iteration = true;
-
-        poker::CpuCfrSolver cpu(game, cpu_config);
-        poker::GpuCfrSolver gpu(game, gpu_config);
-
-        cpu.run_one_iteration();
-        gpu.run_one_iteration();
-
-        const std::vector<float> cpu_current = cpu.average_strategy();
-        const std::vector<float> gpu_current = gpu.average_strategy();
-
-        check_strategy_is_normalized_by_infoset(
-            game,
-            cpu_current,
-            1e-5,
-            "CPU average strategy"
-        );
-
-        check_strategy_is_normalized_by_infoset(
-            game,
-            gpu_current,
-            1e-5,
-            "GPU average strategy"
-        );
-
-        check_near(
-            max_abs_diff(cpu_current, gpu_current),
-            0.0,
-            1e-4,
-            "CPU and GPU average strategies should match after one iteration"
-        );
-
-        check(cpu.stats().iterations_run == 1, "CPU should report one iteration.");
-        check(gpu.stats().iterations_run == 1, "GPU should report one iteration.");
-
-        std::cout << "[pass] test_cpu_gpu_one_iteration_current_strategy_close\n";
-    }
-
-    void test_cpu_gpu_average_strategy_close_after_short_run() {
-        const poker::Game game = poker::KuhnGameBuilder().build();
-
-        constexpr int kIterations = 500;
-
-        poker::CfrConfig cpu_config;
-        cpu_config.use_cfr_plus = false;
-        cpu_config.linear_averaging = false;
-
-        poker::GpuCfrConfig gpu_config;
-        gpu_config.use_cfr_plus = false;
-        gpu_config.linear_averaging = false;
-        gpu_config.synchronize_each_iteration = true;
-
-        poker::CpuCfrSolver cpu(game, cpu_config);
-        poker::GpuCfrSolver gpu(game, gpu_config);
-
-        cpu.run_iterations(kIterations);
-        gpu.run_iterations(kIterations);
-
-        const std::vector<float> cpu_avg = cpu.average_strategy();
-        const std::vector<float> gpu_avg = gpu.average_strategy();
-
-        check_strategy_is_normalized_by_infoset(
-            game,
-            cpu_avg,
-            1e-5,
-            "CPU average strategy"
-        );
-
-        check_strategy_is_normalized_by_infoset(
-            game,
-            gpu_avg,
-            1e-5,
-            "GPU average strategy"
-        );
-
-        check_near(
-            max_abs_diff(cpu_avg, gpu_avg),
-            0.0,
-            0.1,
-            "CPU and GPU average strategies should be close after short run"
-        );
-        std::cout << "[pass] test_cpu_gpu_average_strategy_close_after_short_run\n";
-    }
-
-    void test_cpu_gpu_exploitability_close_after_short_run() {
-        const poker::Game game = poker::KuhnGameBuilder().build();
-
-        constexpr int kIterations = 500;
-
-        poker::CfrConfig cpu_config;
-        cpu_config.use_cfr_plus = false;
-        cpu_config.linear_averaging = false;
-
-        poker::GpuCfrConfig gpu_config;
-        gpu_config.use_cfr_plus = false;
-        gpu_config.linear_averaging = false;
-        gpu_config.synchronize_each_iteration = true;
-
-        poker::CpuCfrSolver cpu(game, cpu_config);
-        poker::GpuCfrSolver gpu(game, gpu_config);
-
-        cpu.run_iterations(kIterations);
-        gpu.run_iterations(kIterations);
-
-        const std::vector<float> cpu_avg = cpu.average_strategy();
-        const std::vector<float> gpu_avg = gpu.average_strategy();
-
-        poker::ExploitabilityEvaluator evaluator(game);
-
-        const poker::ExploitabilityResult cpu_result =
-            evaluator.exploitability(cpu_avg);
-
-        const poker::ExploitabilityResult gpu_result =
-            evaluator.exploitability(gpu_avg);
-
-        check(std::isfinite(cpu_result.exploitability),
-              "CPU exploitability should be finite.");
-
-        check(std::isfinite(gpu_result.exploitability),
-              "GPU exploitability should be finite.");
-
-        check_near(
-            gpu_result.strategy_value_p0,
-            cpu_result.strategy_value_p0,
-            1e-2,
-            "CPU and GPU average strategies should have similar EV"
-        );
-
-        check_near(
-            gpu_result.exploitability,
-            cpu_result.exploitability,
-            1e-2,
-            "CPU and GPU average strategies should have similar exploitability"
-        );
-
-        std::cout << "[pass] test_cpu_gpu_exploitability_close_after_short_run\n";
-    }
-    void run_all_tests() {
-        test_holdem_subgame_flattens_for_gpu();
-        test_holdem_subgame_runs_one_gpu_iteration();
-        test_cpu_gpu_one_iteration_average_strategy_close();
-        test_cpu_gpu_average_strategy_close_after_short_run();
-        test_cpu_gpu_exploitability_close_after_short_run();
-    }
+    std::cout << "[pass] Hold'em GPU flattening\n";
+}
+
+void test_cpu_gpu_agreement(const poker::Game& game, int iterations) {
+    poker::TerminalValueProvider terminal_values;
+    poker::CpuCfrSolver cpu(game, terminal_values);
+    poker::GpuCfrConfig gpu_config;
+    gpu_config.terminal_mode = poker::TerminalMode::RecordComputed;
+    gpu_config.evaluator_data_dir = UTG_TEST_EVALUATOR_DIR;
+    gpu_config.synchronize_each_iteration = true;
+    // Exercise accumulation across chunks with multiple opponent hands.
+    gpu_config.pair_chunk_size = 2;
+    poker::GpuCfrSolver gpu(game, gpu_config);
+    cpu.run_iterations(iterations);
+    gpu.run_iterations(iterations);
+    check(cpu.stats().iterations_run == iterations && gpu.stats().iterations_run == iterations,
+          "Solver iteration count mismatch.");
+    const auto cpu_avg = cpu.average_strategy();
+    const auto gpu_avg = gpu.average_strategy();
+    check_strategy(game, cpu_avg);
+    check_strategy(game, gpu_avg);
+    check_strategy(game, cpu.current_strategy());
+    check_strategy(game, gpu.current_strategy());
+    double diff = 0.0;
+    for (std::size_t i = 0; i < cpu_avg.size(); ++i)
+        diff = std::max(diff, std::abs(static_cast<double>(cpu_avg[i]) - gpu_avg[i]));
+    check_near(diff, 0.0, 1e-3, "CPU/GPU average strategies must agree.");
+    poker::PublicExploitabilityEvaluator evaluator(game, terminal_values);
+    check_near(evaluator.expected_value_p0(cpu_avg), evaluator.expected_value_p0(gpu_avg),
+               0.1, "CPU/GPU strategy EVs must agree.");
+    std::cout << "[pass] CPU/GPU agreement after " << iterations << " iterations (max diff=" << diff << ")\n";
+}
 
 } // namespace
 
 int main() {
-    try {
-        run_all_tests();
-    } catch (const std::exception& e) {
-        std::cerr << "[fail] " << e.what() << "\n";
-        return EXIT_FAILURE;
-    }
-
-    std::cout << "[pass] all river subgame tree tests passed\n";
-    return EXIT_SUCCESS;
+    return run([] {
+        auto config = tiny_config();
+        config.terminal_mode = poker::TerminalMode::DebugComputed;
+        const auto game = poker::holdem::HoldemSubgameBuilder(config).build();
+        test_flattening(game);
+        test_cpu_gpu_agreement(game, 1);
+        test_cpu_gpu_agreement(game, 500);
+    });
 }

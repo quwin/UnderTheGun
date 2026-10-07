@@ -91,6 +91,7 @@ poker::holdem::HoldemSubgameConfig make_test_config() {
     config.oop_player = poker::Player::P0;
     config.ip_player = poker::Player::P1;
     config.collapse_all_in_runouts_to_ev = true;
+    config.terminal_mode = poker::TerminalMode::DebugComputed;
 
     config.p0_range = make_tiny_p0_range();
     config.p1_range = make_tiny_p1_range();
@@ -109,7 +110,7 @@ poker::Game make_test_game() {
     if (game.terminal_value_p0.empty()) {
         throw std::runtime_error(
             "Test game has empty terminal_value_p0. "
-            "GPU HostPrecomputed terminal mode cannot learn without terminal values."
+            "GPU ValuePrecomputed terminal mode cannot learn without terminal values."
         );
     }
 
@@ -205,7 +206,8 @@ RootStrategySnapshot run_gpu(
     config.use_cfr_plus = false;
     config.linear_averaging = false;
     config.synchronize_each_iteration = true;
-    config.terminal_mode = poker::GpuTerminalMode::HostPrecomputed;
+    config.terminal_mode = poker::TerminalMode::RecordComputed;
+    config.evaluator_data_dir = UTG_TEST_EVALUATOR_DIR;
     poker::GpuCfrSolver solver(
         game,
         config
@@ -311,88 +313,22 @@ void test_cpu_root_has_learning_signal() {
 }
 void test_gpu_root_regret_inputs() {
     const poker::Game game = make_test_game();
-
     poker::GpuCfrConfig config;
-    config.terminal_mode = poker::GpuTerminalMode::HostPrecomputed;
+    config.terminal_mode = poker::TerminalMode::RecordComputed;
+    config.evaluator_data_dir = UTG_TEST_EVALUATOR_DIR;
     config.synchronize_each_iteration = true;
-
-    poker::GpuCfrSolver solver(
-        game,
-        config
-    );
-
-    solver.run_iterations(1);
-
-    const auto action_value = solver.debug_action_value_p0();
-    const auto cf_reach = solver.debug_state_bucket_cf_reach();
-    const auto own_reach = solver.debug_state_bucket_own_reach();
-    const auto state_value = solver.debug_state_bucket_value_p0();
+    poker::GpuCfrSolver solver(game, config);
+    solver.run_one_iteration();
+    require(std::isfinite(solver.stats().last_root_value_p0),
+            "GPU root value must be finite.");
     const auto regret = solver.regret_sum();
-
-    const auto& root = game.node(game.root);
-    const auto& state = game.action_state(root.action_state_index);
-
-    int nonzero_action_values = 0;
-    int nonzero_cf_reach = 0;
-    int nonzero_own_reach = 0;
-    int positive_regrets = 0;
-
-    for (int bucket = 0; bucket < state.bucket_count; ++bucket) {
-        const std::size_t sb =
-            static_cast<std::size_t>(state.state_bucket_offset) +
-            static_cast<std::size_t>(bucket);
-
-        if (std::abs(cf_reach[sb]) > 1e-6f) {
-            ++nonzero_cf_reach;
-        }
-
-        if (std::abs(own_reach[sb]) > 1e-6f) {
-            ++nonzero_own_reach;
-        }
-
-        for (int a = 0; a < state.action_count; ++a) {
-            const std::size_t idx = state.tensor_index(bucket, a);
-
-            if (std::abs(action_value[idx]) > 1e-6f) {
-                ++nonzero_action_values;
-            }
-
-            if (regret[idx] > 1e-6f) {
-                ++positive_regrets;
-            }
-        }
-    }
-
-    std::cout
-        << "root nonzero_action_values=" << nonzero_action_values << "\n"
-        << "root nonzero_cf_reach=" << nonzero_cf_reach << "\n"
-        << "root nonzero_own_reach=" << nonzero_own_reach << "\n"
-        << "root positive_regrets=" << positive_regrets << "\n"
-        << "gpu last_root_value_p0=" << solver.stats().last_root_value_p0 << "\n";
-
-    if (nonzero_action_values == 0) {
-        throw std::runtime_error(
-            "Root action values are all zero. Suspect terminal upload, "
-            "backward value pass, or action-value computation."
-        );
-    }
-
-    if (nonzero_cf_reach == 0) {
-        throw std::runtime_error(
-            "Root counterfactual reach is zero. Suspect reach initialization "
-            "or state-bucket reach aggregation."
-        );
-    }
-
-    if (positive_regrets == 0) {
-        throw std::runtime_error(
-            "Root action values/reaches exist but regrets are not positive. "
-            "Suspect sign convention, player perspective conversion, or "
-            "launch_public_update_regrets."
-        );
-    }
+    const auto& state = root_action_state(game);
+    bool positive = false;
+    for (int bucket = 0; bucket < state.bucket_count; ++bucket)
+        positive |= block_has_positive_regret(state, regret, bucket);
+    require(positive, "First GPU iteration must produce positive root regret.");
+    std::cout << "[PASS] GPU root regret inputs produce a learning signal\n";
 }
-
 // -----------------------------------------------------------------------------
 // Test 2:
 // Detect whether GPU is stuck in regret-matching fallback.
@@ -508,7 +444,8 @@ void test_gpu_average_not_uniform_when_current_is_nonuniform() {
 }
 void test_flatten_contains_root_action_edges() {
     const poker::Game game = make_test_game();
-    const poker::FlatPublicGame flat = poker::flatten_public_game_for_gpu(game);
+    poker::FlatTerminalData terminal_data;
+    const poker::FlatPublicGame flat = poker::flatten_public_game_for_gpu(game, terminal_data);
 
     const auto& root = game.node(game.root);
     const auto& root_state = game.action_state(root.action_state_index);

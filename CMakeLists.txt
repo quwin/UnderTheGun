@@ -353,6 +353,11 @@ add_test(
         NAME test_holdem_gpu
         COMMAND test_holdem_gpu
 )
+foreach(gpu_test IN ITEMS test_gpu_strategy test_holdem_gpu)
+    target_compile_definitions(${gpu_test} PRIVATE
+            UTG_TEST_EVALUATOR_DIR="${UTG_EVALUATOR_TABLE_DIR}"
+    )
+endforeach()
 add_executable(test_river_subgame_tree
         tests/test_river_subgame_tree.cpp
 )
