@@ -3,7 +3,6 @@
 #include "holdem/infoset_key.hpp"
 #include "holdem/private_state.hpp"
 #include "holdem/public_state.hpp"
-#include "holdem/street.hpp"
 
 #include "poker/board.hpp"
 #include "poker/hand.hpp"
@@ -88,20 +87,13 @@ poker::Board make_different_river_board() {
 poker::holdem::PublicState make_public_state() {
     poker::holdem::PublicState state;
 
-    state.street = poker::holdem::Street::River;
     state.board = make_river_board();
 
     state.pot = 1000;
     state.p0_stack = 2000;
     state.p1_stack = 2000;
-
-
     state.player_to_act = poker::Player::P0;
-
-    state.terminal = false;
-    state.terminal_reason = poker::holdem::TerminalReason::None;
-
-    state.action_history.clear();
+    state.terminal_type = poker::TerminalType::None;
     state.betting.reset_for_new_street();
 
     return state;
@@ -126,8 +118,7 @@ std::string key_string(
         poker::holdem::make_infoset_key(
             player,
             public_state,
-            private_state,
-            poker::holdem::ExactHandAbstraction()
+            private_state
         )
     );
 }
@@ -328,19 +319,12 @@ void test_key_changes_when_public_board_changes() {
 
 void test_key_changes_when_public_betting_history_changes() {
     poker::holdem::PublicState pub_a = make_public_state();
-
     poker::holdem::PublicState pub_b = pub_a;
-    pub_b.action_history.push_back(
-        poker::holdem::Action{
-            poker::holdem::ActionType::Bet,
-            500
-        }
-    );
+
     pub_b.betting.add_committed(poker::Player::P0, 500);
     pub_b.p0_stack = 1500;
     pub_b.pot = 1500;
     pub_b.player_to_act = poker::Player::P1;
-    pub_b.betting.last_aggressor = poker::Player::P0;
 
     const poker::holdem::PrivateState private_state = make_private_state(
         poker::HoleCards (
@@ -418,7 +402,6 @@ void test_key_changes_when_street_changes() {
     poker::holdem::PublicState pub_a = make_public_state();
 
     poker::holdem::PublicState pub_b = pub_a;
-    pub_b.street = poker::holdem::Street::Turn;
     pub_b.board = make_turn_board();
 
     const poker::holdem::PrivateState private_state = make_private_state(
@@ -547,8 +530,7 @@ void test_key_rejects_non_acting_or_invalid_player() {
         (void)poker::holdem::make_infoset_key(
             poker::Player::Chance,
             pub,
-            private_state,
-            poker::holdem::ExactHandAbstraction()
+            private_state
         );
     } catch (const std::exception&) {
         threw = true;
