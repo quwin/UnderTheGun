@@ -122,6 +122,7 @@ private:
     // One entry per action-state/bucket/action.
     // Size = game_.cfr_tensor_entries().
     std::vector<float> regret_sum_;
+    std::vector<double> iteration_regret_delta_;
     std::vector<float> strategy_sum_;
     std::vector<float> current_strategy_;
 
