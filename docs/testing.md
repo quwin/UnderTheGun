@@ -91,3 +91,7 @@ evaluation. Empty weights on manually built games continue to mean uniform.
 CPU CFR+ aggregates a complete iteration of counterfactual regret before
 clipping at zero. Cancellation, private-pair permutations, nonuniform weights,
 and CPU/GPU CFR+ with linear averaging are covered by dedicated regressions.
+
+CPU/GPU average policies normalize the actual accumulated action mass, avoiding
+drift between action sums and the separate weight counter. Repeated accumulation
+of thirds over long runs must still produce valid probabilities summing to one.

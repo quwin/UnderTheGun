@@ -181,11 +181,11 @@ StrategyTensor CpuCfrSolver::average_strategy() const {
         }
 
         for (int bucket = 0; bucket < state.bucket_count; ++bucket) {
-            const std::size_t bucket_idx =
-                state_bucket_index(state, bucket);
-
-            const double normalizer =
-                static_cast<double>(strategy_weight_sum_[bucket_idx]);
+            // Normalize by the actual accumulated action mass. Its float
+            // rounding can diverge from the independently accumulated weight.
+            double normalizer = 0.0;
+            for (int a = 0; a < state.action_count; ++a)
+                normalizer += strategy_sum_[tensor_index(state, bucket, a)];
 
             if (normalizer > kEpsilon) {
                 for (int a = 0; a < state.action_count; ++a) {
