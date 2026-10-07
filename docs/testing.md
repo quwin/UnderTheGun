@@ -75,8 +75,12 @@ runouts. The builder rejects suit-isomorphic abstractions until their private
 hands can be remapped correctly; exact trees can use more memory.
 
 These regressions establish runout/equity semantics and CPU/GPU agreement for
-small fixtures. They do not establish convergence for arbitrary large flop
-games or validate every betting abstraction. The GPU's `last_root_value_p0`
+small fixtures. Independently certified turn/flop convergence benchmarks are
+described in [postflop-reference.md](postflop-reference.md). They require CPU/GPU
+CFR and CFR+ to reach sub-one-chip exploitability in two restricted betting
+games, with reference probabilities and best-response bounds checked independently
+of production traversal. They do not establish convergence for arbitrary large
+flop games or validate every betting abstraction. The GPU's `last_root_value_p0`
 stats field remains unpopulated; tests check its learning signals and evaluate
 its returned policies through the independently checked profile evaluator.
 

@@ -305,6 +305,11 @@ add_executable(test_average_normalization tests/test_average_normalization.cpp)
 target_link_libraries(test_average_normalization PRIVATE kuhn_gpu_cfr_lib)
 target_compile_definitions(test_average_normalization PRIVATE UTG_TEST_EVALUATOR_DIR="${UTG_EVALUATOR_TABLE_DIR}")
 add_test(NAME test_average_normalization COMMAND test_average_normalization)
+add_executable(test_postflop_convergence tests/test_postflop_convergence.cpp)
+target_link_libraries(test_postflop_convergence PRIVATE kuhn_gpu_cfr_lib)
+target_compile_definitions(test_postflop_convergence PRIVATE UTG_TEST_EVALUATOR_DIR="${UTG_EVALUATOR_TABLE_DIR}")
+add_test(NAME test_turn_convergence COMMAND test_postflop_convergence --street 4)
+add_test(NAME test_flop_convergence COMMAND test_postflop_convergence --street 3)
 
 add_executable(test_solver_validity
         tests/test_solver_validity.cpp
