@@ -293,6 +293,10 @@ add_executable(test_chance_conditioning tests/test_chance_conditioning.cpp)
 target_link_libraries(test_chance_conditioning PRIVATE kuhn_gpu_cfr_lib)
 target_compile_definitions(test_chance_conditioning PRIVATE UTG_TEST_EVALUATOR_DIR="${UTG_EVALUATOR_TABLE_DIR}")
 add_test(NAME test_chance_conditioning COMMAND test_chance_conditioning)
+add_executable(test_range_weights tests/test_range_weights.cpp)
+target_link_libraries(test_range_weights PRIVATE kuhn_gpu_cfr_lib)
+target_compile_definitions(test_range_weights PRIVATE UTG_TEST_EVALUATOR_DIR="${UTG_EVALUATOR_TABLE_DIR}")
+add_test(NAME test_range_weights COMMAND test_range_weights)
 
 add_executable(test_solver_validity
         tests/test_solver_validity.cpp

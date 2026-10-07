@@ -23,8 +23,8 @@ bool is_finite_probability(double value) {
 }
 
 // Used by constructors that do not receive an explicit hand-pair weight provider.
-const UniformHandPairWeightProvider& default_hand_pair_weights() {
-    static const UniformHandPairWeightProvider provider{};
+const GameHandPairWeightProvider& default_hand_pair_weights() {
+    static const GameHandPairWeightProvider provider{};
     return provider;
 }
 

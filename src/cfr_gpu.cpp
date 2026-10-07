@@ -346,6 +346,13 @@ FlatHandData flatten_hand_data_for_gpu(
     flat.p1_hand_count = static_cast<int>(flat.p1_hand_card0.size());
     flat.p0_pair_index = game.hand_pairs.p0_index;
     flat.p1_pair_index = game.hand_pairs.p1_index;
+    game.hand_pairs.validate_weights();
+    double weight_sum = 0.0;
+    for (int pair = 0; pair < game.hand_pairs.pair_count(); ++pair)
+        weight_sum += game.hand_pairs.weight(pair);
+    for (int pair = 0; pair < game.hand_pairs.pair_count(); ++pair)
+        flat.pair_weight.push_back(static_cast<float>(
+            game.hand_pairs.weight(pair) / weight_sum * game.hand_pairs.pair_count()));
     flat.hand_pair_count = game.hand_pairs.pair_count();
     if (flat.p0_hand_count <= 0 || flat.p1_hand_count <= 0 || flat.hand_pair_count <= 0) {
         throw std::runtime_error("Invalid hand data while flattening.");
@@ -760,6 +767,7 @@ void GpuCfrSolver::release() {
     cuda_free_ptr(hands.d_p1_hand_card1);
     cuda_free_ptr(hands.d_p0_pair_index);
     cuda_free_ptr(hands.d_p1_pair_index);
+    cuda_free_ptr(hands.d_pair_weight);
     cuda_free_ptr(hands.d_p0_bucket_by_hand_index);
     cuda_free_ptr(hands.d_p1_bucket_by_hand_index);
 
@@ -884,6 +892,7 @@ void GpuCfrSolver::upload_hand_data() {
 
     cuda_alloc_copy(&hands.d_p0_pair_index, flat.p0_pair_index);
     cuda_alloc_copy(&hands.d_p1_pair_index, flat.p1_pair_index);
+    cuda_alloc_copy(&hands.d_pair_weight, flat.pair_weight);
 
     cuda_alloc_copy(&hands.d_p0_bucket_by_hand_index, flat.p0_bucket_by_hand_index);
     cuda_alloc_copy(&hands.d_p1_bucket_by_hand_index, flat.p1_bucket_by_hand_index);
@@ -1343,6 +1352,8 @@ void GpuCfrSolver::run_reach_pass_for_chunk(
         gpu_.game.root,
         active_pair_count,
         gpu_.work.pair_chunk_size,
+        pair_start,
+        gpu_.hand_data.d_pair_weight,
         gpu_.work.d_node_pair_reach_p0,
         gpu_.work.d_node_pair_reach_p1,
         gpu_.work.d_node_pair_reach_chance

@@ -177,6 +177,13 @@ void HoldemSubgameBuilder::validate_config() const {
     HandDomain p0 = build_hand_domain(config_.p0_range, starting_board);
     HandDomain p1 = build_hand_domain(config_.p1_range, starting_board);
     HandPairTable pairs = build_hand_pair_table(p0, p1);
+    pairs.weights.reserve(pairs.pair_count());
+    for (int pair = 0; pair < pairs.pair_count(); ++pair) {
+        pairs.weights.push_back(
+            static_cast<double>(config_.p0_range.weight(p0.hands[pairs.p0_index[pair]])) *
+            static_cast<double>(config_.p1_range.weight(p1.hands[pairs.p1_index[pair]]))
+        );
+    }
     game.set_hand_domains(
         std::move(p0),
         std::move(p1),
