@@ -1,0 +1,105 @@
+name: Release Windows
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # Manual runs on feature branches must not publish releases.
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: windows-2022
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      RELEASE_VERSION: 1.2.${{ github.run_number }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Check out FLTK 1.4.5
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: fltk/fltk
+          ref: a9b1113516ffd15fc7602a6d425a317df30f4720
+          path: dependencies/fltk
+          persist-credentials: false
+
+      - name: Install CUDA 12.9
+        id: cuda
+        uses: Jimver/cuda-toolkit@b8bf9c6c28f8a92fbb04dcfcaee872e60c57462d # v0.2.36
+        with:
+          cuda: '12.9.0'
+          method: network
+          sub-packages: '["nvcc", "cudart", "visual_studio_integration"]'
+          use-github-cache: false
+
+      - name: Build FLTK
+        run: |
+          cmake -S dependencies/fltk -B dependencies/fltk-build -G "Visual Studio 17 2022" -A x64 -DFLTK_BUILD_TEST=OFF -DFLTK_BUILD_EXAMPLES=OFF -DFLTK_BUILD_FLUID=OFF -DFLTK_BUILD_FLTK_OPTIONS=OFF -DFLTK_BUILD_GL=OFF -DFLTK_BUILD_SHARED_LIBS=OFF
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build dependencies/fltk-build --config Release --parallel 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Configure and build
+        env:
+          CUDA_PATH: ${{ steps.cuda.outputs.CUDA_PATH }}
+        run: |
+          cmake -S . -B build-release -G "Visual Studio 17 2022" -A x64 -T cuda=12.9 "-DCUDAToolkit_ROOT=$env:CUDA_PATH" "-DFLTK_DIR=$env:GITHUB_WORKSPACE/dependencies/fltk-build" "-DUTG_FLTK_LICENSE=$env:GITHUB_WORKSPACE/dependencies/fltk/COPYING" "-DUTG_RELEASE_VERSION=$env:RELEASE_VERSION"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build build-release --config Release --parallel 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run CPU regression tests
+        # Standard hosted Windows runners have no CUDA-capable GPU.
+        run: |
+          ctest --test-dir build-release -C Release --output-on-failure --no-tests=error --timeout 120 -R '^test_(exploitability|solver_validity|betting_engine|infoset_key_privacy|terminal_utility|river_subgame_tree|turn_subgame_tree|flop_subgame_tree)$'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package and verify release
+        run: |
+          cpack --config build-release/CPackConfig.cmake -C Release -B release-assets
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./scripts/verify-release.ps1 -Archive "release-assets/UnderTheGun-$env:RELEASE_VERSION-windows-x64.zip"
+
+      - name: Save release artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: UnderTheGun-${{ env.RELEASE_VERSION }}-windows-x64
+          path: |
+            release-assets/*.zip
+            release-assets/*.sha256
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        run: |
+          $tag = "v$env:RELEASE_VERSION"
+          $archive = "release-assets/UnderTheGun-$env:RELEASE_VERSION-windows-x64.zip"
+          gh release create $tag $archive "$archive.sha256" --target $env:GITHUB_SHA --title "UnderTheGun $tag" --generate-notes --latest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Save test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-diagnostics
+          path: build-release/Testing/Temporary/
+          if-no-files-found: ignore

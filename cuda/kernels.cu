@@ -29,8 +29,14 @@
 //   Terminal = 2
 
 #include "kernels.hpp"
+// Keep the upstream submodule pristine while separating its device symbols
+// from the CPU evaluator's C symbols. The evaluator is compiled here directly.
+#define evaluate_7cards cuda_evaluate_7cards
+#define hash_quinary cuda_hash_quinary
 #include "../external/CUDA-Poker-Calculator/src/cuda/evaluator7.cu"
 #include "../external/CUDA-Poker-Calculator/src/cuda/hash.cu"
+#undef hash_quinary
+#undef evaluate_7cards
 
 #include <cuda_runtime_api.h>
 #include <cstddef>

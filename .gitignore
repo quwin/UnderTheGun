@@ -13,3 +13,5 @@
 /.idea/*
 /bin/*
 /build-release/
+/release-assets/
+/dependencies/

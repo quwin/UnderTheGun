@@ -65,7 +65,7 @@ Use Back to return to inputs and solve a different game.
 ---
 
 ## 🪟 Windows Installation
-1. Go to the Releases tab and download `UnderTheGun_1.1.0_windows.zip`: https://github.com/quwin/UnderTheGun/releases
+1. Download the latest `UnderTheGun-<version>-windows-x64.zip` from [Releases](https://github.com/quwin/UnderTheGun/releases/latest).
 2. Unzip the folder
 3. Inside the folder, double-click underthegun.exe
 4. Windows may warn you about an untrusted app — click More Options → Run Anyway
@@ -79,6 +79,9 @@ For anyone wrorried about security: this project is fully open source — feel f
 ---
 
 ## 🛠 Developer Notes
+
+Windows releases are built automatically after updates to the default branch.
+See [release automation and local packaging](docs/releases.md) for build details.
 
 Huge thanks to Anubhav Parida's Shark 2.0, which I used as a foundation with permission, including re-using their GUI:
 https://github.com/24parida/shark-2.0/

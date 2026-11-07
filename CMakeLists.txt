@@ -32,7 +32,7 @@ set(CMAKE_CUDA_ARCHITECTURES 61 75 80 86 89)
 find_package(CUDAToolkit REQUIRED)
 
 # ---- GUI executable ----
-set(FLTK_DIR "C:/fltk-1.4.5/build")
+# Supply FLTK_DIR or CMAKE_PREFIX_PATH when configuring on a new machine.
 find_package(FLTK 1.4 REQUIRED CONFIG)
 
 add_library(gui_library
@@ -141,6 +141,10 @@ copy_evaluator_tables_for_target(under_the_gun_gui)
 
 install(
         TARGETS under_the_gun_gui
+        RUNTIME_DEPENDENCIES
+            DIRECTORIES "${CUDAToolkit_BIN_DIR}"
+            PRE_EXCLUDE_REGEXES "api-ms-" "ext-ms-"
+            POST_EXCLUDE_REGEXES ".*[Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\\\].*"
         RUNTIME DESTINATION .
 )
 
@@ -223,17 +227,12 @@ add_library(kuhn_gpu_cfr_lib
         include/file_helper.hpp
 )
 
-add_library(cuda_evaluator7 STATIC IMPORTED)
-
-set_target_properties(cuda_evaluator7 PROPERTIES
-        IMPORTED_LOCATION
-        "../external/CUDA-Poker-Calculator/lib-cuda/evaluator7.lib"
-)
-
 target_include_directories(kuhn_gpu_cfr_lib
         PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/cuda
+        PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/CUDA-Poker-Calculator/src/cuda/include
 )
 
 target_compile_features(kuhn_gpu_cfr_lib
@@ -245,7 +244,6 @@ target_link_libraries(kuhn_gpu_cfr_lib
         PUBLIC
         pheval
         CUDA::cudart
-        cuda_evaluator7
 )
 
 target_compile_definitions(kuhn_gpu_cfr_lib
@@ -420,44 +418,22 @@ add_test(
         COMMAND test_flop_subgame_tree
 )
 
-include(GNUInstallDirs)
-
-install(
-        TARGETS under_the_gun_gui
-        RUNTIME DESTINATION .
-)
-
-install(
-        FILES
-        $<TARGET_RUNTIME_DLLS:under_the_gun_gui>
-        DESTINATION .
-)
-
-install(
-        CODE [[
-        file(GET_RUNTIME_DEPENDENCIES
-            EXECUTABLES "$<TARGET_FILE:under_the_gun_gui>"
-            RESOLVED_DEPENDENCIES_VAR resolved_deps
-            UNRESOLVED_DEPENDENCIES_VAR unresolved_deps
-        )
-
-        foreach(dep IN LISTS resolved_deps)
-            file(INSTALL
-                DESTINATION "${CMAKE_INSTALL_PREFIX}"
-                TYPE FILE
-                FILES "${dep}"
-            )
-        endforeach()
-
-        if(unresolved_deps)
-            message(WARNING "Unresolved runtime dependencies: ${unresolved_deps}")
-        endif()
-    ]]
-)
+# Bundle the redistributable MSVC runtime, never copies of Windows system DLLs.
+set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION .)
+include(InstallRequiredSystemLibraries)
+install(FILES external/PokerHandEvaluator/LICENSE
+        DESTINATION licenses RENAME PokerHandEvaluator.txt)
+install(FILES external/CUDA-Poker-Calculator/LICENSE
+        DESTINATION licenses RENAME CUDA-Poker-Calculator.txt)
+set(UTG_FLTK_LICENSE "" CACHE FILEPATH "FLTK COPYING file to include in releases")
+if(UTG_FLTK_LICENSE)
+    install(FILES "${UTG_FLTK_LICENSE}" DESTINATION licenses RENAME FLTK.txt)
+endif()
 
 set(CPACK_PACKAGE_NAME "UnderTheGun")
 set(CPACK_PACKAGE_VENDOR "UnderTheGun")
-set(CPACK_PACKAGE_VERSION "1.1.0")
+set(UTG_RELEASE_VERSION "1.2.0" CACHE STRING "Version used in release packages")
+set(CPACK_PACKAGE_VERSION "${UTG_RELEASE_VERSION}")
 set(CPACK_GENERATOR "ZIP")
 set(CPACK_PACKAGE_FILE_NAME "UnderTheGun-${CPACK_PACKAGE_VERSION}-windows-x64")
 
